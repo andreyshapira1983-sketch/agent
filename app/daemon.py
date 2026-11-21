@@ -1,39 +1,4 @@
-"""Long-running daemon core: the main asyncio event loop.
-
-This module is the foundation for the continuous-service mode of the agent
-(plan item 1.1). Unlike ``agent_tick.py`` — which wakes up once, does one
-bounded pass, and exits — :class:`DaemonLoop` stays alive, sleeps until it is
-woken, and dispatches each wake-up to a handler.
-
-Scope of this module (deliberately minimal)
--------------------------------------------
-- An asyncio loop that does NOT exit after one pass.
-- A safe wake-up mechanism (:meth:`DaemonLoop.wake` from inside the loop,
-  :meth:`DaemonLoop.wake_threadsafe` from other threads).
-- A cooperative stop (:meth:`DaemonLoop.request_stop`) so callers can end the
-  loop deterministically.
-- Graceful shutdown (plan item 1.2): signal handling (Ctrl+C / SIGTERM where
-  supported), task tracking via :meth:`DaemonLoop.spawn`, draining in-flight
-  tasks with a bounded timeout, cancelling stragglers, and closing registered
-  resources. Repeated shutdown is safe.
-- An extension point for future event sources (timers, file watchers, task
-  queues): they only need a reference to the loop object and call
-  ``wake(reason)`` / ``wake_threadsafe(reason)``.
-
-``agent_tick.py`` remains the supported single-shot fallback mode; nothing
-here replaces or imports it.
-
-Usage
------
-::
-
-    async def handler(reasons: list[str]) -> None:
-        ...  # react to wake-up reasons
-
-    daemon = DaemonLoop(on_wake=handler)
-    asyncio.run(daemon.run())          # runs until daemon.request_stop()
-
-"""
+"""Persistent asyncio daemon loop: explicit wake-ups, a handler call per wake, graceful stop."""
 from __future__ import annotations
 
 import asyncio
@@ -45,12 +10,10 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Reason recorded when the loop wakes because idle_timeout elapsed rather
-# than because someone called wake().
+# Wake reason recorded when idle_timeout elapses without a wake() call.
 IDLE_TIMEOUT_REASON = "idle-timeout"
 
-# Bounded grace period (seconds) given to cancelled tasks to unwind before
-# shutdown gives up on them and merely logs a warning. Never blocks forever.
+# Seconds cancelled tasks get to unwind before shutdown abandons them; never blocks forever.
 CANCEL_GRACE_SECONDS = 5.0
 
 WakeHandler = Callable[[list[str]], Awaitable[None]]
@@ -62,17 +25,11 @@ class DaemonLoopError(RuntimeError):
 
 
 class DaemonLoop:
-    """Minimal persistent asyncio event loop with explicit wake-ups.
+    """Persistent asyncio event loop with explicit wake-ups.
 
-    Parameters ---------- on_wake: Async callback invoked with the list of
-    wake reasons collected since the previous iteration. Exceptions raised
-    by the handler are logged and do not terminate the loop. idle_timeout:
-    Optional number of seconds after which the loop wakes on its own with
-    the reason :data:`IDLE_TIMEOUT_REASON`. ``None`` (default) means the
-    loop sleeps until explicitly woken. This is the hook future timer
-    sources (plan item 2.1) can build on. drain_timeout: Bounded number of
-    seconds shutdown waits for in-flight tasks (started via :meth:`spawn`)
-    to finish before cancelling them. Must be >= 0.
+    Args: on_wake gets the reasons collected since the last iteration (its errors are logged);
+    idle_timeout wakes the loop on its own (None: sleep until woken); drain_timeout is how
+    long shutdown waits for spawned tasks before cancelling them.
     """
 
     def __init__(
@@ -101,8 +58,6 @@ class DaemonLoop:
         self._shutdown_started = False
         self._shutdown_complete = asyncio.Event()
 
-    # ── observability ────────────────────────────────────────────────────
-
     @property
     def running(self) -> bool:
         """True while :meth:`run` is executing."""
@@ -128,8 +83,6 @@ class DaemonLoop:
         """Number of tracked in-flight tasks."""
         return sum(1 for t in self._tasks if not t.done())
 
-    # ── task tracking / resources ────────────────────────────────────────
-
     def spawn(
         self, coro: Coroutine[Any, Any, Any], *, name: str | None = None
     ) -> asyncio.Task:
@@ -143,14 +96,8 @@ class DaemonLoop:
         return task
 
     def add_close_callback(self, callback: CloseCallback) -> None:
-        """Register a resource-closing callback (sync or async).
-
-        Callbacks run once, in registration order, at the end of shutdown.
-        Errors are logged and do not abort the remaining callbacks.
-        """
+        """Register a sync or async close callback; all run once, in order, at shutdown end."""
         self._close_callbacks.append(callback)
-
-    # ── producer API ─────────────────────────────────────────────────────
 
     def wake(self, reason: str = "manual") -> None:
         """Wake the loop from within the same event loop / thread."""
@@ -158,54 +105,23 @@ class DaemonLoop:
         self._wake_event.set()
 
     def wake_threadsafe(self, reason: str = "manual") -> None:
-        """Wake the loop from another thread.
-
-        Safe to call before the loop starts (the reason is queued) and after
-        it stops (the call is a no-op apart from recording the reason).
-        """
+        """Wake the loop from another thread; if it is not running, just queue the reason."""
         loop = self._loop
         if loop is None or loop.is_closed():
-            # Loop not running yet (or already gone): queue the reason so it
-            # is picked up on the first iteration.
             self._pending_reasons.append(reason)
             return
         loop.call_soon_threadsafe(self.wake, reason)
 
     def request_stop(self) -> None:
-        """Ask the loop to exit after the current iteration.
-
-        Idempotent: calling it multiple times is safe.
-        """
+        """Ask the loop to exit after the current iteration (idempotent)."""
         self._stop_requested = True
         self._wake_event.set()
 
-    # ── core loop ────────────────────────────────────────────────────────
-
     async def run(self, *, handle_signals: bool = False) -> None:
-        """Run until :meth:`request_stop` is called.
+        """Run until request_stop(); graceful shutdown runs exactly once on any exit.
 
-        The loop:
-        1. waits for a wake-up (or ``idle_timeout``),
-        2. drains all pending reasons,
-        3. dispatches them to ``on_wake`` (errors are logged, not raised),
-        4. repeats.
-
-        On exit (stop request, cancellation, or signal) graceful shutdown
-        runs exactly once: in-flight tasks are drained for ``drain_timeout``
-        seconds, stragglers are cancelled, and close callbacks fire.
-
-        Parameters
-        ----------
-        handle_signals:
-            When True, install Ctrl+C (SIGINT) and — where the platform
-            supports it — SIGTERM handlers that request a graceful stop.
-            Handlers are restored/removed on exit.
-
-        Raises
-        ------
-        DaemonLoopError
-            If the loop is already running or has already finished. Each
-            :class:`DaemonLoop` instance runs at most once.
+        handle_signals installs SIGINT (and SIGTERM where supported) handlers that request a
+        graceful stop. Raises DaemonLoopError if run twice: an instance runs at most once.
         """
         if self._running:
             raise DaemonLoopError("DaemonLoop is already running")
@@ -230,14 +146,10 @@ class DaemonLoop:
             self._finished = True
             logger.info("daemon loop stopped after %d iteration(s)", self._iterations)
 
-    # ── graceful shutdown (plan item 1.2) ────────────────────────────────
-
     async def shutdown(self, *, drain_timeout: float | None = None) -> None:
         """Request a graceful stop and wait until shutdown has completed.
 
-        Parameters ---------- drain_timeout: Override for the instance
-        ``drain_timeout`` (only effective on the call that ends up
-        performing the drain).
+        drain_timeout overrides the instance value; only the call that performs the drain uses it.
         """
         if drain_timeout is not None:
             if drain_timeout < 0:
@@ -246,8 +158,7 @@ class DaemonLoop:
         self._shutdown_started = True
         self.request_stop()
         if not self._running and not self._shutdown_complete.is_set():
-            # Loop never started (or already unwound without finalizing):
-            # finalize directly so callers are not left waiting forever.
+            # Loop not running: finalize here, or the wait below would never end.
             await self._finalize_shutdown()
             self._finished = True
         await self._shutdown_complete.wait()
@@ -307,8 +218,6 @@ class DaemonLoop:
                     await result
             except Exception:
                 logger.exception("shutdown: close callback %r failed", callback)
-
-    # ── signal handling ──────────────────────────────────────────────────
 
     def _install_signal_handlers(self) -> list[tuple[signal.Signals, str, Any]]:
         """Install SIGINT/SIGTERM handlers; returns entries for later removal."""
@@ -386,8 +295,7 @@ class DaemonLoop:
         try:
             await self._on_wake(reasons)
         except asyncio.CancelledError:
-            # Cancellation must propagate: it is how shutdown (1.2) will
-            # eventually interrupt in-flight work.
+            # Cancellation must propagate: shutdown uses it to interrupt in-flight work.
             raise
         except Exception:
             logger.exception("daemon wake handler failed for reasons=%s", reasons)

@@ -1,16 +1,4 @@
-"""Budget guard — turn an exhausted model budget into a resumable pause.
-
-Wraps ``agent.run()`` so that a :class:`ModelBudgetExceeded` raised mid-cycle
-does not just surface as an error string: the run's state is persisted as a
-``paused`` checkpoint and queued as a paused task, so ``--resume <trace_id>``
-can pick it up later.
-
-Extracted verbatim from ``main.py`` as part of the incremental CLI decomposition.
-It lives under ``app/`` rather than ``cli/`` because it is about *running the
-agent*, not about the command-line surface — the CLI merely calls it. Import the
-helpers from here; the ``main.py`` re-exports that used to mirror them were
-removed with the rest of the compatibility block in Phase 7.
-"""
+"""Run the agent so that an exhausted model budget becomes a resumable pause."""
 from __future__ import annotations
 
 import sys
@@ -36,20 +24,13 @@ def _run_agent_with_budget_guard(
     deep_escalation=None,
     resumed_from: str | None = None,
 ) -> str:
-    """Run the agent, optionally streaming synthesis tokens to stdout.
+    """Run the agent, optionally streaming synthesis tokens to stdout; return the answer.
 
-    When *stream* is True (default), synthesis tokens are printed to stdout
-    as they arrive so the user sees a progressive response.  The full answer
-    is still returned for post-processing (memory writes, formatting, etc.).
-
-    *resumed_from* names the paused trace this run resumes (from
-    ``ResumeDecision.resumed_paused_trace``). When the run completes without
-    a new budget stop, the paused task that trace queued is retired; a run
-    that pauses again retires nothing — the work is still not done.
+    resumed_from: the paused trace this run resumes; its paused task is retired
+    only when the run completes without a new budget stop.
     """
     if stream:
-        # Print a blank line before streaming starts so the answer is visually
-        # separated from the spinner / log output on stderr.
+        # Separates the streamed answer from spinner/log output on stderr.
         print("\n", end="", flush=True)
         _streaming_done = []
 
@@ -75,8 +56,6 @@ def _run_agent_with_budget_guard(
                 file_hint=file_hint,
                 blocked=exc,
             )
-        # End the streaming line cleanly; the caller will print the formatted
-        # version below (which strips Output Contract headers / citations).
         if _streaming_done:
             print()  # newline after streamed tokens
         return answer
@@ -104,12 +83,9 @@ def _retire_resumed_pause(
     workspace: Path | None,
     resumed_from: str | None,
 ) -> None:
-    """Close the pause record a completed resume run has just made obsolete.
+    """Mark done the paused task that a completed resume run has made obsolete.
 
-    The resumed run carries a fresh trace_id, so the join to the old paused
-    task goes through ``resumed_from`` — the trace ``resolve_resume`` restored.
-    Best-effort like the rest of this module: queue trouble must not eat the
-    answer the user is owed.
+    Matched by ``resumed_from`` because the resumed run carries a fresh trace_id.
     """
     if not resumed_from:
         return
@@ -234,9 +210,8 @@ def _persist_resumable_budget_stop(
     resolved_workspace = _workspace_from_agent(agent, workspace)
     if resolved_workspace is None:
         return
-    # Реплику в очередь работ не кладём: оператор сидит здесь и наберёт её
-    # заново, а очередь кормит непригляданный режим. Контрольная точка выше
-    # записана в любом случае — возобновить ход вручную по-прежнему можно.
+    # A live conversation turn is not queued: the operator retypes it, and the
+    # queue feeds unattended mode. The checkpoint above still allows --resume.
     gateway_path = getattr(agent, "gateway_path", INTERACTIVE_GATEWAY_PATH)
     if not checkpoint_is_resumable_work(gateway_path):
         agent.log.log("resumable_task_not_queued", {
@@ -244,10 +219,7 @@ def _persist_resumable_budget_stop(
             "reason": "interrupted turn was a live conversation, not unattended work",
             "stop_reason": payload.get("stop_reason"),
         })
-        # Подсказку `resume=<trace>` печатал `:task-list` из очереди — то есть
-        # ровно та строка, которую здесь больше не заводят. Без этой печати
-        # оператор потерял бы единственное место, где узнавал, что ход можно
-        # продолжить: точка сохранена, продолжать есть что.
+        # Without a queue entry `:task-list` shows no resume hint, so print it here.
         print(
             f"[resume] ход прерван ({payload.get('stop_reason')}); "
             f"продолжить: --resume {payload.get('trace_id') or trace_id}",

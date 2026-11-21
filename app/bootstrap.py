@@ -6,7 +6,7 @@ from pathlib import Path
 
 from cli.parsers import _env_bool
 from core.approval import ApprovalProvider
-from core.assumption_registry import AssumptionStore  # Layer 5
+from core.assumption_registry import AssumptionStore
 from core.budget_ledger import BudgetLedger
 from core.logger import TraceLogger
 from core.loop import AgentLoop, new_trace_id
@@ -53,8 +53,7 @@ from tools.web_search import WebSearchTool
 
 DEFAULT_PERSISTENT_PATH = Path("data") / "persistent_memory.jsonl"
 DEFAULT_SOURCE_REGISTRY_PATH = Path("data") / "source_registry.jsonl"
-# Re-exported from `core.task_queue`, which owns the store: one definition,
-# and the daemon can read it without importing this module.
+# Owned by core.task_queue, so the daemon can read it without importing this module.
 DEFAULT_RUNTIME_TASKS_PATH = _DEFAULT_RUNTIME_TASKS_PATH
 DEFAULT_RUNTIME_SCHEDULES_PATH = Path("data") / "runtime_schedules.jsonl"
 DEFAULT_MODEL_USAGE_PATH = Path("data") / "model_usage.jsonl"
@@ -63,13 +62,11 @@ DEFAULT_EPISODIC_MEMORY_PATH = Path("data") / "episodic_memory.jsonl"
 DEFAULT_PROCEDURAL_MEMORY_PATH = Path("data") / "procedural_memory.jsonl"
 DEFAULT_MEMORY_CONSOLIDATION_PATH = Path("data") / "memory_consolidation.jsonl"
 DEFAULT_USER_PROFILE_PATH = Path("data") / "user_profile.jsonl"
-DEFAULT_ASSUMPTIONS_PATH = Path("data") / "assumptions.jsonl"  # Layer 5
-#: Нижняя ступень причинной лестницы: наблюдение переживает ход.
+DEFAULT_ASSUMPTIONS_PATH = Path("data") / "assumptions.jsonl"
+#: Causal observations, kept on disk so they outlive the turn.
 DEFAULT_CAUSAL_PATH = Path("data") / "causal_observations.jsonl"
-#: Where a clarification parks the question it asked ABOUT, so the operator's
-#: reply is added to that question instead of replacing it. Survives the
-#: process because the agent that asks and the agent that hears the answer
-#: are not the same object — measured, see core/pending_clarification.py.
+#: The question a clarification asked about, so the reply extends it instead of replacing it;
+#: on disk because the agent that asks and the one that hears the answer are different objects.
 DEFAULT_PENDING_CLARIFICATION_PATH = Path("data") / "pending_clarification.json"
 
 
@@ -86,27 +83,11 @@ def build_agent(
 ) -> AgentLoop:
     """Assemble the production agent for one entry point.
 
-    Memory is controlled along four INDEPENDENT axes, because "has stores",
-    "may read them", "may replay an answer from them" and "may write durable
-    state" are genuinely different permissions:
-
-    - ``with_memory``      — session/working memory.
-    - ``with_persistent``  — persistent/semantic memory (+ source registry,
-                             user profile, assumptions).
-    - ``with_experience``  — episodic/procedural/consolidation stores. Defaults
-                             to ``with_memory`` so every existing caller keeps
-                             its current profile; pass it explicitly to give a
-                             path experience memory without working memory.
-    - ``experience_retrieval`` / ``episodic_replay`` / ``durable_writes``
-                           — read, replay and write permissions, forwarded to
-                             the loop (see ``AgentLoop.__init__``).
-
-    ``durable_writes`` is an ALLOWLIST of durable sinks: ``None`` means "all"
-    (the interactive default), a frozenset permits exactly those sinks and
-    denies everything else, and ``frozenset()`` denies all durable writes. The
-    audit and dry-run brakes outrank it absolutely. It is **instance-scoped**:
-    fixed for the whole life of the returned agent, with deliberately no
-    per-run API yet.
+    Args:
+        with_persistent: semantic memory plus source registry, user profile, assumptions.
+        with_experience: episodic/procedural stores; None means the same as with_memory.
+        durable_writes: allowlist of durable sinks for the agent's lifetime;
+            None allows all, frozenset() denies all.
     """
     if with_experience is None:
         with_experience = with_memory
@@ -117,72 +98,50 @@ def build_agent(
     registry.register(FindInFilesTool(workspace_root=workspace))
     registry.register(WebSearchTool())
     registry.register(FileWriteTool(workspace_root=workspace))
-    # Journal append tool - appends to journal files, needs only workspace root
     registry.register(JournalAppendTool(workspace_root=workspace))
     registry.register(ShellExecTool(workspace_root=workspace))
-    # Лаборатория: замер собственной среды экспериментом (см. tools/python_probe.py).
     registry.register(PythonProbeTool(workspace_root=workspace))
-    # Прибор причинного происхождения уроков (см. tools/lesson_provenance_tool.py).
     registry.register(LessonProvenanceTool(workspace_root=str(workspace)))
-    # Pure clock primitive — keeps the agent from guessing today's date.
     registry.register(CurrentTimeTool())
-    # MVP-13.1 — self-repair diagnostic primitives.
     registry.register(RunTestsTool(workspace_root=workspace))
     registry.register(PatchCheckTool(workspace_root=workspace))
     registry.register(ReadLogsTool(workspace_root=workspace, live_trace_id=trace_id))
     registry.register(DiffFileTool(workspace_root=workspace))
-    # Программы для файлов клиента под пользователем nobody (tools/convert_file.py).
     registry.register(ConvertFileTool(workspace_root=workspace))
-    # MVP-14.2 — evidence layer: turn web pointers into verifiable sources.
     registry.register(WebFetchTool())
     registry.register(RssFetchTool())
-    # Academic paper search — Semantic Scholar Graph API (no key needed).
     registry.register(SemanticScholarSearchTool())
 
     logger = TraceLogger(trace_id=trace_id, log_dir=workspace / "logs", verbose=True)
 
     policy = PolicyGate(registry)
-    # Optional safety brake: when AGENT_REQUIRE_WRITE_APPROVAL is truthy, the
-    # agent/runtime loop must get human approval before creating even a new
-    # (reversible) file. Overwrites (irreversible) and external actions already
-    # escalate; this closes the new-file path. Off by default so existing
-    # behaviour and the test suite are unchanged. Operator scripts that write
-    # files directly never pass through this gate and are therefore unaffected.
+    # Opt-in brake: even a new (reversible) file needs approval; overwrites already escalate.
     if _env_bool("AGENT_REQUIRE_WRITE_APPROVAL", False):
         policy.escalate_reversible_tools = frozenset({"file_write"})
-    # Optional safety brake: when AGENT_FREEZE_AUTO_MEMORY is truthy, the
-    # agent may not silently grow its own persistent memory. The knowledge
-    # pipeline writes 'agent-auto' records straight through the memory write
-    # policy — a side channel PolicyGate never sees (the file_write approval
-    # gate does not cover memory). Freezing that source forces every
-    # agent-initiated memory write to be rejected; user ':remember' writes
-    # (source='user-explicit') are unaffected. Off by default.
+    # Opt-in brake: 'agent-auto' memory writes bypass PolicyGate, so only the write
+    # policy can reject them; user ':remember' writes still pass.
     if _env_bool("AGENT_FREEZE_AUTO_MEMORY", False):
         write_policy = MemoryWritePolicy(frozen_sources={"agent-auto"})
     else:
         write_policy = MemoryWritePolicy()
     budget_ledger = BudgetLedger.from_env(path=workspace / DEFAULT_BUDGET_LEDGER_PATH, logger=logger,
                                           config_path=workspace / "config" / "budget_limits.json")
-    policy.pressure = pressure_of(budget_ledger)  # «тревога» числом: core/pressure_gate.py
+    policy.pressure = pressure_of(budget_ledger)
     model_usage_ledger = ModelUsageLedger.from_env(
         path=workspace / DEFAULT_MODEL_USAGE_PATH,
         logger=logger,
         budget_ledger=budget_ledger,
     )
-    # Block 7 (audit W3, 2026-09-03): every egress tool charges `web_fetches`
-    # on the same persistent ledger the model calls use. Before this the
-    # counter had limits, a kill-switch and a health line, and no charger.
+    # Egress tools charge `web_fetches` on the same persistent ledger as model calls.
     for egress_tool in ("web_search", "web_fetch", "rss_fetch"):
         registry.get(egress_tool).budget_ledger = budget_ledger
-    # His routing policy (operator's word 2026-09-04 22:20): read by the
-    # router ahead of the env pins; the credential is substituted here.
+    # The operator's routing policy; the router reads it ahead of the env pins.
     routing_policy = RoutingPolicyStore(workspace / DEFAULT_ROUTING_POLICY_PATH)
     model_router = ModelRouter.from_env(
         usage_ledger=model_usage_ledger, routing_policy=routing_policy,
     )
     registry.register(ModelRouteTool(store=routing_policy))
-    # The eye on his own models (operator's word 2026-09-04, «ставь глаз»):
-    # read-only, registered for every path including the unattended one.
+    # Read-only, registered on every path including the unattended one.
     from tools.model_roster import ModelRosterTool
 
     registry.register(ModelRosterTool(
@@ -190,10 +149,8 @@ def build_agent(
         routing_policy=routing_policy, workspace=workspace,
     ))
 
-    # Agent-as-tool: spawn_subagent must be registered AFTER policy and
-    # model_router are built, because it holds references to both.
-    # It is intentionally absent from _SAFE_SUBAGENT_TOOLS so sub-agents
-    # cannot recursively spawn further sub-agents.
+    # Registered after policy and model_router, which it holds; kept out of
+    # _SAFE_SUBAGENT_TOOLS so sub-agents cannot spawn further sub-agents.
     from tools.spawn_subagent import SpawnSubagentTool
 
     registry.register(SpawnSubagentTool(
@@ -207,12 +164,10 @@ def build_agent(
     llm = model_router.for_role(ModelRole.SYNTHESIZER)
     planner = LLMPlanner(
         llm=model_router.for_role(ModelRole.PLANNER),
-        registry=registry, workspace=str(workspace),  # адрес уроков: см. kwarg
+        registry=registry, workspace=str(workspace),
     )
     memory = WorkingMemory() if with_memory else None
 
-    # Уточнение ждёт ответа на диске: спрашивает один процесс, отвечает другой.
-    # Условие — рабочая память, см. `core/pending_clarification.py`.
     pending_clarification_path = (
         workspace / DEFAULT_PENDING_CLARIFICATION_PATH if with_memory else None
     )
@@ -220,7 +175,7 @@ def build_agent(
     persistent_store: PersistentMemoryStore | None = None
     source_registry_store: SourceRegistryStore | None = None
     user_profile_store: UserProfileStore | None = None
-    assumption_store: AssumptionStore | None = None  # Layer 5
+    assumption_store: AssumptionStore | None = None
     episodic_store: EpisodicMemoryStore | None = None
     procedural_store: ProceduralMemoryStore | None = None
     consolidation_store: MemoryConsolidationStore | None = None
@@ -232,26 +187,18 @@ def build_agent(
             workspace / DEFAULT_SOURCE_REGISTRY_PATH
         )
         user_profile_store = UserProfileStore(workspace / DEFAULT_USER_PROFILE_PATH)
-        assumption_store = AssumptionStore(workspace / DEFAULT_ASSUMPTIONS_PATH)  # Layer 5
-        # Register the memory bank tool to persist and retrieve agent memories.
+        assumption_store = AssumptionStore(workspace / DEFAULT_ASSUMPTIONS_PATH)
         registry.register(MemoryBankTool(store=persistent_store, policy=write_policy))
-        # The read half of the same door (authority change 2026-09-04): a
-        # bounded, low-trust search of his own durable memory, by his hand.
         registry.register(MemoryRecallTool(store=persistent_store))
 
-    # Experience memory is a SEPARATE axis, deliberately outside the
-    # `with_persistent` block above. It used to be nested under both
-    # `with_persistent` and `with_memory`, which tied episodic/procedural
-    # learning to working memory and left the unattended agent unable to
-    # record or recall experience at all.
+    # A separate axis on purpose: the unattended agent records experience
+    # without working or persistent memory.
     if with_experience:
         episodic_store = EpisodicMemoryStore(workspace / DEFAULT_EPISODIC_MEMORY_PATH)
         procedural_store = ProceduralMemoryStore(
             workspace / DEFAULT_PROCEDURAL_MEMORY_PATH
         )
-        # consolidation_store deliberately NOT constructed since 2026-08-22
-        # (MIR-044, operator ruling 2026-07-19): the tally is computed on
-        # demand by `:memory-consolidate` / `:smart-memory`; nothing persists.
+        # consolidation_store stays None: `:memory-consolidate` / `:smart-memory` tally on demand.
         from core.causal_store import CausalObservationStore
         causal_store = CausalObservationStore(workspace / DEFAULT_CAUSAL_PATH)
 
@@ -286,8 +233,7 @@ def build_agent(
         },
     )
 
-    # Emit persistent_memory_load up front so traces always show what the
-    # session started with — even if the store is empty.
+    # Logged even for an empty store, so every trace shows what the session started with.
     if persistent_store is not None:
         records = persistent_store.load()
         logger.log(
@@ -349,13 +295,12 @@ def build_agent(
         knowledge_auto_write=_env_bool("AGENT_KNOWLEDGE_AUTO_WRITE", True),
         approval_provider=approval_provider,
         user_profile_store=user_profile_store,
-        assumption_store=assumption_store,  # Layer 5
+        assumption_store=assumption_store,
         pending_clarification_path=pending_clarification_path,
         experience_retrieval=experience_retrieval,
         episodic_replay=episodic_replay,
         durable_writes=durable_writes,
-        # Прочитанное — не конец хода (core/observation_round.py). Выключено по
-        # умолчанию до замера: включается AGENT_OBSERVE_BEFORE_ANSWER=1.
+        # Off by default until measured (core/observation_round.py).
         observe_before_answer=_env_bool("AGENT_OBSERVE_BEFORE_ANSWER", False),
         max_replan_attempts=max(1, int(os.getenv("AGENT_MAX_REPLANS", "3") or 3)),
     )

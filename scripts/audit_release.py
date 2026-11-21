@@ -1,8 +1,4 @@
-"""CI-friendly release and supply-chain gate.
-
-This script intentionally avoids constructing the agent or LLM adapters, so it
-can run on GitHub Actions without model API keys.
-"""
+"""CI release and supply-chain gate; builds no agent or model client, so it needs no API keys."""
 from __future__ import annotations
 
 import json

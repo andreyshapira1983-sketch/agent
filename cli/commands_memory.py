@@ -1,13 +1,4 @@
-"""Memory / hygiene / rollback REPL commands.
-
-Split out of ``main.py``. Every function here drives the agent only through its
-public methods (``rollback``, ``expire_persistent``, ``dedupe_persistent``,
-``prune_episodic``, ``cleanup_backups``, ``summarise_persistent``,
-``archive_persistent``, ``list_persistent``, ``smart_memory_summary`` and the
-smart-memory stores) plus
-``core`` helpers — never back into ``main`` — so there is no import cycle.
-``main.py`` re-exports every name below for the REPL dispatch and the tests.
-"""
+"""Memory, hygiene, rollback and receipt REPL commands; they never import main (no cycle)."""
 from __future__ import annotations
 
 import json
@@ -69,8 +60,6 @@ def _parse_archive_args(args: list[str]) -> tuple[float | None, int | None]:
     for arg in args:
         if arg.startswith("--threshold="):
             threshold = float(arg.split("=", 1)[1])
-            # inf/NaN/0 и >1 проходили, опечатка `--treshold` молча давала
-            # порог по умолчанию (проверка 16.11, средняя).
             if not (math.isfinite(threshold) and 0 < threshold <= 1):
                 raise ValueError("threshold must be a finite number in (0, 1]")
         elif arg.startswith("--min-age="):
@@ -80,8 +69,7 @@ def _parse_archive_args(args: list[str]) -> tuple[float | None, int | None]:
     return threshold, min_age_days
 
 
-#: Флаги режима `:hygiene`. Без `--apply`/`--yes` любой проход — сухой
-#: (проверка 16.11, средняя): голый `:hygiene` удалял по-настоящему.
+#: `:hygiene` mode flags; without --apply/--yes every pass is a dry run.
 _HYGIENE_MODE_FLAGS = frozenset({"--dry-run", "--apply", "--yes"})
 _HYGIENE_NO_ARG_SUBS = frozenset({"", "all", "expire", "dedupe", "backups", "episodic"})
 _HYGIENE_DRY_HINT = (
@@ -115,7 +103,7 @@ def _handle_hygiene(rest: str, agent: AgentLoop, workspace: Path) -> bool:  # no
         print("(:hygiene: --dry-run and --apply together — nothing done)", file=sys.stderr)
         return True
     dry_run = not apply
-    # Тестовые двойники без метода — без тормоза; фасады цикла всё равно не удалят.
+    # Doubles without the method get no brake; loop facades do not delete anyway.
     brake_of = getattr(agent, "_hygiene_apply_brake", None)
     brake = brake_of() if apply and callable(brake_of) else None
     if brake:
@@ -131,9 +119,7 @@ def _handle_hygiene(rest: str, agent: AgentLoop, workspace: Path) -> bool:  # no
         return _hygiene_refuse(sub, rest_args)
 
     if sub in {"", "all"}:
-        # Default order: expire (free TTL records) -> dedupe (collapse
-        # what's left) -> backups (filesystem). Summarise is omitted
-        # from the bulk run because it needs an explicit tag.
+        # Expire TTL records before dedupe; summarise needs a tag, so it is not in the bulk run.
         exp = agent.expire_persistent(dry_run=dry_run)
         dup = agent.dedupe_persistent(dry_run=dry_run)
         epi = agent.prune_episodic(dry_run=dry_run)
@@ -237,12 +223,7 @@ def _handle_hygiene(rest: str, agent: AgentLoop, workspace: Path) -> bool:  # no
             f"threshold={rep.threshold}, min_age_days={rep.min_age_days}",
             file=sys.stderr,
         )
-        # F-2 (docs/audit/FIELD_CHECK_QUEUE.md): правило MIR-074 назвало это
-        # «отодвинем подальше» — dormant, not destroyed. Сон осмыслен, только
-        # если из него можно разбудить, а `load_archive()` не имеет ни одного
-        # вызывающего: ни в агенте, ни в CLI, ни в тике. Живой замер
-        # 2026-08-24: 125 записей активны, 778 в архиве. Цена архивации
-        # называется здесь, чтобы «подальше» не читалось как «на время».
+        # Name where the records went and how to read them back.
         if not dry_run and rep.archived:
             print(
                 "  they now live in data/persistent_memory.archive.jsonl — "
@@ -273,8 +254,7 @@ def _print_persistent(agent: AgentLoop) -> None:
 
 def _handle_smart_memory(rest: str, agent: AgentLoop) -> bool:
     tokens = _split_meta_args(rest)
-    # MIR-138: архив достижим взглядом — `archive <слово>` ищет по спящим
-    # записям, только чтение; пробуждение — отдельная власть (MIR-156).
+    # `archive <word>` searches archived records read-only; waking them is a separate power.
     if tokens and tokens[0] == "archive":
         term = " ".join(tokens[1:]).strip()
         if not term:
@@ -339,10 +319,7 @@ def _handle_memory_consolidate(rest: str, agent: AgentLoop) -> bool:
     ):
         print("(smart memory stores are not configured)", file=sys.stderr)
         return True
-    # Computed fresh, PERSISTED NOWHERE — the operator's 2026-07-19 ruling
-    # (MIR-044), executed 2026-08-22: the report is a pure tally of statuses
-    # the procedures already hold, and persisting one per request had bought
-    # 255 reports / 738 KB that only this command's sibling ever displayed.
+    # Computed fresh and never persisted: it only tallies statuses the procedures hold.
     report = consolidate_memory(
         episodes=agent.episodic_store.load(),
         procedures=agent.procedural_store.load(),
@@ -364,7 +341,7 @@ def _handle_memory_consolidate(rest: str, agent: AgentLoop) -> bool:
 
 
 def _handle_receipts(rest: str, agent: AgentLoop, workspace: Path) -> bool:
-    """`:receipts [trace <кусок>] [N]` — спросить накопленную улику (MIR-138)."""
+    """`:receipts [trace <part>] [N]`: show the accumulated tool receipts."""
     from core.tool_receipts import ToolReceiptLedger, default_receipts_path, summarise_receipts
 
     tokens = rest.split()

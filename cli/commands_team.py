@@ -1,4 +1,4 @@
-"""Команды оператора для команды агентов: план и запуск."""
+"""Operator commands for an agent team: plan and run."""
 from __future__ import annotations
 
 import json
@@ -10,7 +10,7 @@ from cli.parsers import _split_meta_args
 from core.team_executor import TeamBudget, TeamExecutor
 from core.team_plan import TeamPlanner
 
-if TYPE_CHECKING:  # pragma: no cover — только для подписи
+if TYPE_CHECKING:  # pragma: no cover — type hints only
     from core.loop import AgentLoop
 
 

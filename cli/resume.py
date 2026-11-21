@@ -1,28 +1,4 @@
-"""``--resume <trace_id>``: decide what a previous run leaves us to do.
-
-Four outcomes, in the order the checks run:
-
-1. the trace id fails the allowlist -> exit **2**, nothing is read;
-2. no usable checkpoint -> say so, run fresh;
-3. the last phase is ``paused`` with paused data -> restore the question and file
-   hint from it and run;
-4. a cached answer exists -> print it and exit **0** without building an agent;
-5. otherwise the previous cycle did not finish -> restore the question and re-run.
-
-Check 3 runs *before* check 4, so a paused last phase wins over a cached answer.
-An explicit ``--ask`` / ``--file`` wins over a restored value; with a cached
-answer (outcome 4) they are ignored, and a stderr notice says so.
-
-Extracted from ``main()``. Unlike the earlier extraction steps this one could not
-be a verbatim move -- the code lived *inside* ``main()``, so it became a function
-returning a :class:`ResumeDecision` instead of returning from ``main()`` directly.
-The body is the original block with exactly three renames (``args.resume`` ->
-``trace_id``, ``args.ask`` -> ``ask``, ``args.file`` -> ``file_hint``) and its two
-``return`` statements wrapped; every message string is untouched, and the
-behaviour is pinned by ``tests/characterization/test_cli_resume_branches.py``.
-The odd-looking function-local ``import re as _re`` is preserved for the same
-reason -- tidying it is a separate, behaviour-neutral change.
-"""
+"""``--resume <trace_id>``: decide what a previous run leaves to do."""
 from __future__ import annotations
 
 import json
@@ -38,18 +14,12 @@ if TYPE_CHECKING:  # annotations only
 
 @dataclass(frozen=True)
 class ResumeDecision:
-    """What ``main()`` should do next.
-
-    ``exit_code`` is set only when the caller must return immediately; otherwise
-    ``ask`` / ``file_hint`` carry the (possibly restored) values to run with.
-    """
+    """What ``main()`` does next: return ``exit_code`` if set, else run with ask/file_hint."""
 
     exit_code: int | None = None
     ask: str | None = None
     file_hint: str | None = None
-    # Set only by the paused branch: the trace whose pause this run resumes.
-    # It is the sole join between the old paused task and the new run, which
-    # carries a fresh trace_id — the guard retires the task through it.
+    # Paused branch only: the sole link from the old paused task to this run (new trace_id).
     resumed_paused_trace: str | None = None
 
 
@@ -86,12 +56,9 @@ def resolve_resume(
     ask: str | None,
     file_hint: str | None,
 ) -> ResumeDecision:
-    """Resolve ``--resume`` into a decision; prints the same notices as before."""
+    """Resolve ``--resume`` into a decision; a paused last phase wins over a cached answer."""
     import re as _re
-    # Mirror the allowlist that CheckpointWriter uses: alphanumerics plus
-    # hyphens and underscores only.  Reject anything with slashes, dots,
-    # or other characters that could produce a path-traversal when the
-    # loader constructs its file path (core/checkpoint.py:166).
+    # Same allowlist as CheckpointWriter: the id becomes part of a file path (no traversal).
     _SAFE_TRACE_RE = _re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$')
     if not _SAFE_TRACE_RE.match(trace_id):
         print(
@@ -125,7 +92,6 @@ def resolve_resume(
             ask=ask, file_hint=file_hint, resumed_paused_trace=trace_id
         )
     elif _ctx.answer is not None:
-        # Full cycle completed previously — replay the cached answer.
         print(
             f"[resume] Replaying cached answer for trace_id={trace_id!r} "
             f"(phase={_ctx.last_phase}, artifacts={list(_ctx.artifacts)})",
@@ -140,8 +106,6 @@ def resolve_resume(
         print("\n" + format_human_response(_ctx.answer) + "\n")
         return ResumeDecision(exit_code=0)
     else:
-        # Cycle did not complete — fall through to a normal run so the
-        # agent re-tries from scratch (safe default).
         print(
             f"[resume] Checkpoint found but synthesis incomplete "
             f"(last_phase={_ctx.last_phase!r}). Re-running from scratch.",

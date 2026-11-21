@@ -1,12 +1,7 @@
-"""Settle the completion axis on episodes banked before their writer learned
-to.
+"""Backfill completion_state on episodes banked before their writer recorded it.
 
-**How it writes.** Rows are integrity-envelope encoded, so hand-editing the
-file corrupts it. The rewrite goes through `state_file_lock` +
-`rewrite_state_jsonl_unlocked`, the same path the store itself uses when
-pruning (`core/smart_memory.py:505-532`), and only the `completion_state`
-key is added — no `from_dict`/`to_dict` round trip that could silently
-normalise other fields.
+Dry run by default; --apply backs the store up and rewrites it through the store's own
+locked JSONL path (rows carry an integrity envelope), adding only the completion_state key.
 """
 
 from __future__ import annotations
@@ -83,8 +78,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"no episodic store at {path} — nothing to do")
         return 0
 
-    # The lock is held across read and write: a tick banking an episode midway
-    # would otherwise be dropped by the rewrite.
+    # The lock spans read and write, or an episode banked midway would be lost in the rewrite.
     with state_file_lock(path):
         payloads = read_state_jsonl_unlocked(path)
         plan = plan_backfill(payloads)

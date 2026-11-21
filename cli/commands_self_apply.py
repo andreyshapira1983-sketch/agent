@@ -1,14 +1,4 @@
-"""``:self-apply-run`` REPL command (TD-024).
-
-The single narrow operator trigger that routes one *already approved* inbox
-item through the trusted self-apply lane. It accepts exactly one approval id
-and nothing else — no free-text patch, no extra arguments. All the policy lives
-in :mod:`core.self_apply_bridge`; this module only wires runtime dependencies
-(inbox, SafeVCS, test runner, kill-switch, budget snapshot) and prints a report.
-
-This command is deliberately not wired into any daemon / scheduler / agent_tick
-path: a human runs it explicitly, one proposal at a time.
-"""
+"""``:self-apply-run``: apply one already approved inbox item through the self-apply lane."""
 from __future__ import annotations
 
 import sys
@@ -28,7 +18,6 @@ if TYPE_CHECKING:
 
 
 def _handle_self_apply_run(rest: str, agent: AgentLoop, workspace: Path) -> bool:
-    # Exactly one bare approval id; reject free text / extra args / patch bodies.
     parts = rest.split()
     if len(parts) != 1:
         print(
@@ -70,17 +59,10 @@ def _handle_self_apply_run(rest: str, agent: AgentLoop, workspace: Path) -> bool
         },
     )
 
-    # Journal the apply outcome (committed vs rolled back, and WHY) into episodic
-    # memory so the agent remembers its own failed/succeeded attempts.
     record_self_build_episode(agent, kind="self-apply-run", result=result)
 
-    # Rollback -> HARD RULE: machine-readable failure causes (e.g. ImportError:
-    # cannot import name 'X' from 'core.y') become durable rules the Critic
-    # enforces deterministically on every later produce run for that target.
-    # Рядом с правилом пишется урок с происхождением — тот же орган, что на
-    # автономном пути (2026-09-17): опыт CLI и опыт безнадзорного слива обязаны
-    # лежать в одном месте и в одной форме, иначе «что агент уже знает» зависит
-    # от того, кто нажал кнопку.
+    # A rollback's machine-readable cause becomes a hard rule the Critic enforces later,
+    # plus a lesson with provenance in the same store the autonomous path uses.
     try:
         from core.self_build_rules import record_lessons_from_result
 
@@ -99,11 +81,7 @@ def _handle_self_apply_run(rest: str, agent: AgentLoop, workspace: Path) -> bool
     except Exception:  # noqa: BLE001, S110 — rule recording must never break the command
         pass
 
-    # No `--json` mode here on purpose. The documented surface of this command is
-    # `<inbox_id>` and nothing else (cli/command_registry.py, knowledge/maps/COMMANDS_MAP.md,
-    # the :help page all agree), and the one-argument guard above means a
-    # `--json` token could only ever arrive *as* the id — so the branch that used
-    # to live here could only pretty-print a refusal, never a real run.
+    # No --json mode on purpose: with one argument allowed, --json could only arrive as the id.
     lines = [
         "=== self-apply run ===",
         f"proposal: {result.get('proposal_id')}",
@@ -120,11 +98,7 @@ def _handle_self_apply_run(rest: str, agent: AgentLoop, workspace: Path) -> bool
         lines.append(f"commit: {result.get('commit_hash')}")
     if result.get("rejected_files"):
         lines.append(f"rejected_files: {result.get('rejected_files')}")
-    # MIR-139: риски печатаются, и печатаются ПЕРЕД строкой «next». До
-    # 2026-08-24 поле заполнялось и не выводилось вовсе — а раскрытие, до
-    # которого не доходит взгляд, равно молчанию. Здесь среди прочего приезжает
-    # единственный факт, которого человеку не хватало на решении о СЛИЯНИИ:
-    # что патч изменил и политику, и её судью одним актом, и в какую сторону.
+    # Print risks before "next": the human needs them for the merge decision.
     for risk in result.get("risks") or ():
         lines.append(f"risk: {risk}")
     lines.append(f"next: {result.get('next_human_action')}")

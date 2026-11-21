@@ -188,11 +188,7 @@ def _handle_task_cancel(rest: str, agent: AgentLoop, workspace: Path) -> bool:
 
 
 def _handle_task_unblock(rest: str, agent: AgentLoop, workspace: Path) -> bool:
-    """Return an approval-blocked task to the queue.
-
-    A `blocked` row is waiting on a human decision, so a human is the only thing
-    that can move it — no timer, no retry schedule. This is that move.
-    """
+    """Return an approval-blocked task to the queue; only a human moves a `blocked` row."""
     task_id = rest.strip()
     if not task_id:
         print("Usage: :task-unblock <task_id>", file=sys.stderr)

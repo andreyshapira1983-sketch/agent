@@ -1,26 +1,4 @@
-"""``:self-build-produce`` REPL command (TD-025, grounded default TD-036).
-
-A single narrow operator trigger that runs the subagent-backed self-apply
-*producer*: a Manager/Researcher/Builder/Critic/Reporter pipeline that generates
-at most one validated low-risk full-content proposal and drops it into the
-approval inbox as an ``operation="self_apply_lane.run"`` item.
-
-The Manager picks its target + diagnosis from a *grounded* backlog candidate
-(TECH_DEBT.md / knowledge/generated/AGENT_ANATOMY.md) by default — it never invents a diagnosis
-via the LLM. When the grounded path yields no publishable target (empty backlog,
-or a candidate that is off-allowlist / critical) the command returns ``no_patch``
-with the precise grounded reason instead of falling back to the LLM.
-
-It is deliberately narrow:
-
-* it accepts NO arguments and NO free-text patch;
-* it ONLY creates one approval inbox item — it never applies the patch, never
-  runs the lane, never commits/pushes/merges;
-* it is NOT wired into any daemon / scheduler / agent_tick path.
-
-The applied step stays behind the existing human-in-the-loop ``:self-apply-run``
-command (TD-024).
-"""
+"""Self-build REPL commands (produce, supervisor, propose); none of them applies a patch."""
 from __future__ import annotations
 
 import difflib
@@ -49,8 +27,7 @@ if TYPE_CHECKING:
 
 
 def _handle_self_build_produce(rest: str, agent: AgentLoop, workspace: Path) -> bool:
-    # Narrow trigger: no arguments, no free-text patch. Anything extra is a
-    # misuse and is rejected outright.
+    # Narrow trigger: any argument, a free-text patch included, is refused.
     if rest.strip():
         print(
             "Usage: :self-build-produce\n"
@@ -85,10 +62,7 @@ def _handle_self_build_produce(rest: str, agent: AgentLoop, workspace: Path) -> 
         return True
     result = report.to_dict()
 
-    # Surface the grounded Manager decision (TD-036) so the operator can see
-    # whether a verifiable backlog candidate drove the run, and — when it did not
-    # produce a patch — the precise grounded reason (empty backlog, off-allowlist
-    # target, or critical target) rather than a vague message.
+    # Show whether a grounded backlog candidate drove the run, or the exact reason it did not.
     manager = next(
         (r for r in (result.get("roles") or []) if r.get("role") == "manager"),
         None,
@@ -97,9 +71,8 @@ def _handle_self_build_produce(rest: str, agent: AgentLoop, workspace: Path) -> 
     grounded = bool(manager_data.get("grounded"))
     evidence_ref = manager_data.get("evidence_ref") or ""
     manager_detail = (manager or {}).get("detail") or ""
-    # True when the grounded path ran but yielded no publishable target. This is
-    # NOT necessarily an empty backlog — a candidate may have been found and then
-    # rejected as off-allowlist/critical; manager_detail carries the exact reason.
+    # Not necessarily an empty backlog: a found candidate may be rejected as
+    # off-allowlist or critical; manager_detail carries the exact reason.
     no_grounded_target = (
         result.get("status") in {"no_patch", "no_grounded_target"}
         and manager is not None
@@ -123,9 +96,7 @@ def _handle_self_build_produce(rest: str, agent: AgentLoop, workspace: Path) -> 
         },
     )
 
-    # Journal the attempt (and WHY it did/didn't produce a patch) into episodic
-    # memory so the agent accumulates its own lessons instead of relying on a
-    # human to re-investigate every outcome.
+    # The outcome and its reason go to episodic memory; later runs read them as lessons.
     record_self_build_episode(agent, kind="self-build-produce", result=result)
 
     lines = [
@@ -158,9 +129,7 @@ def _handle_self_build_produce(rest: str, agent: AgentLoop, workspace: Path) -> 
 
 
 # ── :self-build-supervisor ───────────────────────────────────────────────────
-# Read-only supervisor cycle, extracted verbatim from main.py. It decides
-# whether to wait, stop, or propose one evidence-backed candidate; the helpers
-# below are its read-only evidence collectors.
+# The helpers below are its read-only evidence collectors.
 
 
 def _tech_debt_summary(workspace: Path) -> dict:
@@ -196,11 +165,7 @@ def _tech_debt_summary(workspace: Path) -> dict:
 
 
 def _recent_error_lines(workspace: Path, *, max_errors: int = 5) -> list[str]:
-    """Best-effort scan of the newest trace log for recent error events.
-
-    Read-only and defensive: any failure returns an empty list. Only compact,
-    log-safe identifiers (event name + optional error type) are surfaced.
-    """
+    """Names of recent error events in the newest trace log; best effort, [] on failure."""
     try:
         log_dir = workspace / "logs"
         candidates = sorted(
@@ -237,9 +202,7 @@ def _recent_error_lines(workspace: Path, *, max_errors: int = 5) -> list[str]:
 
 
 def _handle_self_build_supervisor(rest: str, agent: AgentLoop, workspace: Path) -> bool:
-    """Read-only supervisor cycle: decide whether to wait, stop, or propose one
-    evidence-backed self-build candidate. Never applies changes / runs tests /
-    writes files / calls shell_exec / refreshes models."""
+    """Read-only supervisor cycle: wait, stop, or propose one evidence-backed candidate."""
     as_json = "--json" in _split_meta_args(rest)
     budget_windows = _budget_ledger_snapshot(agent)
     approvals_pending = int(
@@ -327,18 +290,7 @@ UNSAFE_SCAN_DIRS = {
 def _handle_self_build_propose(
     rest: str, agent: AgentLoop | None, workspace: Path
 ) -> bool:
-    """Propose a self-build target. Reachable by TWO paths, hence the `| None`.
-
-    `cli/command_dispatch.py` calls it like every other handler, with a live
-    agent. `cli/app.py` calls it as a fast path BEFORE an agent exists, so that
-    `:self-build-propose` costs no `.env` load and no agent build — and passed
-    `None` behind a `# type: ignore[arg-type]`, which silenced the checker
-    instead of admitting the second caller. The annotation says it now.
-
-    The parameter stays in the signature: 61 dispatcher call sites share the
-    `(rest, agent, workspace)` shape, and breaking that for the one handler
-    that ignores its agent would cost more than it buys.
-    """
+    """Propose a self-build target; `agent` is None on the cli/app.py fast path."""
     del agent
     tokens = _split_meta_args(rest)
     if "--large-files" in tokens:

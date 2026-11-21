@@ -1,24 +1,4 @@
-"""Prove the architecture's load-bearing claims — read-only, exit non-zero on
-drift.
-
-**INV-2 — no orphaned deciders.** Every module under `core/` must be
-imported by some non-test module. The repo's own recurring anti-pattern
-(`knowledge/doctrine/self-audit-lessons.md` #6) is "a module written to fix
-a live failure mode, never wired into its entry point" — a mechanism that
-exists, is unit-tested, and cannot run in production. `recover_stuck` was
-exactly that for months.
-
-**INV-3 — documented environment flags exist.** Every `AGENT_*` variable
-named in `docs/` must appear in the code. A flag that was renamed leaves the
-docs telling operators to set something with no effect.
-
-**INV-4 — the verifier's verdict vocabulary has no silent members.** Every
-verdict `core/verifier_core.py` can assign must be known to the consumers
-that bucket verdicts (`core/low_evidence_policy.py`,
-`core/unsupported_claims.py`, `core/loop.py`). A new verdict that nobody
-buckets is silently dropped from the evidence accounting — which is how a
-supported claim can end up counted as unsupported.
-"""
+"""Check the architecture's load-bearing invariants (read-only; non-zero exit on drift)."""
 from __future__ import annotations
 
 import ast
@@ -29,55 +9,37 @@ REPO = Path(__file__).resolve().parent.parent
 CORE = REPO / "core"
 DOCS = REPO / "docs"
 
-#: Layers `core/` may never import. `main` and `agent_tick` are entry points;
-#: `cli` and `app` are the command/orchestration layers above the core.
+#: Layers `core/` may never import: the entry points and the layers above the core.
 _FORBIDDEN_CORE_IMPORTS = ("cli", "app", "main", "agent_tick")
 
 #: Directories whose imports count as "production reachability" for INV-2.
 _PRODUCTION_ROOTS = (
     "core", "cli", "app", "api", "tools", "project_intelligence",
-    # `docker/daemon_loop.py` is the supervisor that repeats agent_tick, i.e.
-    # the continuous-autonomy path — production code that was outside every
-    # root. Found 2026-08-14 by removing compose.yaml: INV-3 then reported
-    # AGENT_DOCKER_TICK_TIMEOUT_SECONDS as read by nobody, though
-    # docker/daemon_loop.py:94 reads it. compose.yaml naming the flag had been
-    # covering the hole by coincidence.
+    # docker/daemon_loop.py repeats agent_tick: the continuous-autonomy path.
     "docker",
 )
-#: Точки входа. scripts/market_worker.py — исполнитель Agent Market, живой
-#: процесс опроса площадки (запущен 2026-09-25), а не разовый замер.
+#: Entry points; scripts/market_worker.py is a live polling process, not a one-off script.
 _PRODUCTION_FILES = ("agent_tick.py", "main.py", "scripts/market_worker.py")
 
-#: Modules exempt from INV-2 with a stated reason. Keep this list short and
-#: argued — every entry is a mechanism that cannot run.
+#: Modules exempt from INV-2; every entry states its reason and is a mechanism that cannot run.
 _ORPHAN_ALLOWLIST: dict[str, str] = {
-    # ДАННЫЕ, не решатель: таблица групп анатомии, вынесенная в core НАМЕРЕННО
-    # (MIR-180) — полоса вправе менять core/*.py и не вправе scripts/, а без
-    # строки группировки каждый инкрементальный раскол откатывался сторожем.
-    # Потребители существуют и названы: scripts/gen_anatomy.py читает файл
-    # ast-разбором БЕЗ импорта (правило скрипта «не исполнять код агента»), а
-    # _sync_anatomy_groups в core/self_build_producer.py читает его текстом.
-    # «Не импортируется» здесь означает «литерал», а не «мёртв».
+    # Data, not a decider. Readers: scripts/gen_anatomy.py (ast parse, no import) and
+    # _sync_anatomy_groups in core/self_build_producer.py (as text).
     "anatomy_groups": ("standing: data literal, parsed not imported; readers "
                        "named above — постоянна по замыслу, пока таблица групп "
                        "остаётся данными без импортёров"),
 }
 
-#: Env vars a document names deliberately without the code having them yet.
-#: Each entry states why; a flag that merely got renamed does NOT belong here.
+#: Env vars documented on purpose before code reads them; a renamed flag does not belong here.
 _ENV_ALLOWLIST: dict[str, str] = {
-    # Master flag of the phased plan in MEMORY_LIFECYCLE_CONTRACT.md §15, which
-    # is a proposal: phase P0 ("flag scaffolding") has not been built.
+    # MEMORY_LIFECYCLE_CONTRACT.md §15 is a proposal; its phase P0 is not built.
     "AGENT_MEMORY_LIFECYCLE": "planned — memory lifecycle plan, phase P0 unbuilt",
-    # Read by tests/conftest.py (`_deny_outbound_network`, MIR-053) — a
-    # test-suite opt-in, so it lives outside the production roots this
-    # invariant scans on purpose. The flag and its reader are pinned by
-    # tests/test_network_deny.py, so this entry cannot mask a dead flag.
+    # tests/test_network_deny.py pins the flag and its reader; this entry cannot hide a dead flag.
     "AGENT_TESTS_ALLOW_NETWORK": "test-suite flag — read by tests/conftest.py, outside production roots",
 }
 
-#: A flag introduced on a line carrying one of these words is documented as not
-#: existing yet. Mirrors `_PLANNED_MARKERS` in docs_code_conformance.py.
+#: Words that mark a documented flag as not built yet; mirrors `_PLANNED_MARKERS`
+#: in docs_code_conformance.py.
 _ENV_PLANNED_MARKERS = (
     "proposed", "planned", "will be", "would be", "not yet", "to be added",
 )
@@ -90,8 +52,7 @@ _VERDICT_CONSUMERS = (
     "core/verifier_models.py",
 )
 
-#: Verdicts consumers need not name individually — they are the default/"good"
-#: cases every consumer already handles by falling through.
+#: Default verdicts every consumer already handles by falling through.
 _VERDICT_EXEMPT = frozenset({"unverified"})
 
 
@@ -153,13 +114,8 @@ def check_no_orphaned_modules() -> tuple[list[str], int]:
     ], len(names)
 
 
-#: A token that is part of a FILE NAME is not an environment variable. Documents
-#: name `knowledge/doctrine/future/AGENT_ROLE_CONTRACT.md`, and the bare
-#: `AGENT_[A-Z0-9_]+` rule read its stem as a flag "no code reads" — true of the
-#: filename and meaningless as a claim about the environment. The negative
-#: lookahead drops anything immediately followed by a short extension. Until
-#: 2026-08-22 documents dodged this by escaping the underscores by hand, which
-#: put the workaround in the prose and left the next author to rediscover it.
+#: The lookahead skips file names such as `AGENT_ROLE_CONTRACT.md`: a token followed by
+#: a short extension is not an environment variable.
 _ENV_FLAG_RE = re.compile(r"\bAGENT_[A-Z0-9_]{3,}\b(?!\.[A-Za-z0-9]{1,5})")
 
 
@@ -211,8 +167,7 @@ def check_verdict_vocabulary() -> tuple[list[str], int]:
     }
     problems: list[str] = []
     for verdict in sorted(verdicts):
-        # `<verdict>_chunks` is how the report exposes a bucket; either spelling
-        # counts as "this consumer knows the verdict exists".
+        # `<verdict>_chunks` is the report's bucket name; either spelling counts.
         if any(
             verdict in text or f"{verdict}_chunks" in text
             for text in consumers.values()

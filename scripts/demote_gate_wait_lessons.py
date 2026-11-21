@@ -1,37 +1,11 @@
-"""One-time migration: existing gate-wait rows stop being lessons.
+"""One-time migration: self-build gate-wait episodes stop being protected lessons.
 
-WHO NEEDS THIS. The 2026-08-22 writer fix (`core/self_build_memory.py`) stops
-tagging pre-flight gate refusals as `lesson` — but it is forward-only, and the
-registry's own rule (MIR-115 addendum) says a repair in this family must state
-which EXISTING rows it changes and how they can leave the store. This script is
-that statement, executable: the live store held 64 wait-rows, all
-`lesson`-protected (unevictable), all `usage_eligible=True` via the tag bypass,
-43 of them byte-identical. Without this pass they would sit in the protected
-set forever, exactly as MIR-058's evidence rotted while its gates were
-forward-only.
+For each self-build episode carrying a gate-wait status tag it removes the `lesson` tag,
+re-decides usage_eligible with the current admission rule (admit_for_storage) and then
+collapses byte-identical duplicates among the demoted rows, keeping the newest. Genuine
+lessons are untouched. Dry-run by default; --apply writes after a timestamped backup.
 
-WHAT IT DOES, per matching row (question is a self-build kind AND a gate-wait
-status tag is present):
-
-* removes the `lesson` tag — the row becomes ordinary: evictable by the FIFO,
-  visible to `select_duplicate_episodes`;
-* re-decides `usage_eligible` through the CURRENT admission rule
-  (`admit_for_storage`), the same backfill principle as
-  `scripts/completion_backfill.py`: replay the writer's rule, never invent a
-  verdict by hand;
-* then collapses byte-identical duplicates among the demoted rows via the
-  existing `select_duplicate_episodes` (keeps the newest of each group) — the
-  in-house mechanism MIR-090 built, which could never reach these rows while
-  they were protected.
-
-Everything else is untouched: genuine lessons keep their tag, and rows are
-never deleted by this script except as exact duplicates of a surviving row.
-
-SAFETY. Dry-run by default; `--apply` writes. A timestamped backup of the
-store is written before any change. Run:
-
-    python scripts/demote_gate_wait_lessons.py            # report only
-    python scripts/demote_gate_wait_lessons.py --apply    # backup, then write
+Usage: python scripts/demote_gate_wait_lessons.py [--apply] [--workspace PATH]
 """
 from __future__ import annotations
 

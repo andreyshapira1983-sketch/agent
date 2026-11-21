@@ -1,13 +1,4 @@
-"""Разбор накопленного: конфликты источников и реестр допущений.
-
-Приехало из `cli/commands_misc.py`, которого больше нет. Тот файл сам себя
-называл «разное» и держал шесть несвязанных тем: по имени нельзя было узнать,
-что внутри, а войти в него приходилось за любой из шести.
-
-Обе команды только ЧИТАЮТ: `:conflicts` показывает противоречия между
-источниками, `:assumptions` — последние допущения, которые агент себе
-позволил. Приобретение знаний — в `cli/commands_learn.py`.
-"""
+"""Read-only review commands: source conflicts (`:conflicts`) and recent assumptions."""
 from __future__ import annotations
 
 import json
@@ -18,7 +9,7 @@ from typing import TYPE_CHECKING
 from cli.parsers import _split_meta_args
 from core.conflict_review import ConflictReview
 
-if TYPE_CHECKING:  # pragma: no cover — только для подписи
+if TYPE_CHECKING:  # pragma: no cover — annotations only
     from core.loop import AgentLoop
 
 
@@ -69,7 +60,7 @@ def _handle_conflicts(rest: str, agent: AgentLoop, workspace: Path) -> bool:
         print(report.user_summary(limit=limit), file=sys.stderr)
     return True
 
-def _handle_assumptions(rest: str, agent: AgentLoop) -> bool:  # Layer 5
+def _handle_assumptions(rest: str, agent: AgentLoop) -> bool:
     """Show the most-recent assumptions logged by the Assumption Registry."""
     use_json = "--json" in rest
     store = getattr(agent, "assumption_store", None)

@@ -1,33 +1,4 @@
-"""MVP-13.1 — `run_tests` tool: sandboxed pytest runner.
-
-Lets the agent verify its own changes by running the project's test
-suite (or a filtered subset). This is the cornerstone of the
-self-repair loop: every proposed code change must come with a test
-run, and the loop rolls back if the new tests don't pass.
-
-Safety model:
-  - never `shell=True`; argv built from a fixed prefix + user-supplied
-    paths/pattern. No metacharacters get to the OS shell because there
-    IS no shell in the pipeline.
-  - cwd is the workspace root; pytest cannot escape it.
-  - timeout (default 900 s) — the full suite is 7262 tests and has been measured
-    at 327-411 s here; the default is twice the worst measurement, capped via
-    subprocess. Override with AGENT_TEST_TIMEOUT_SECONDS.
-  - output capped at 1 MiB stdout / 1 MiB stderr to keep audit logs
-    bounded; oversized output is truncated with a marker.
-  - stdout/stderr pass through `redact_text` before being returned, so
-    a credential printed inside a test never lands on disk or LLM.
-  - paths are ASCII-only and validated to be relative + inside the
-    workspace.
-
-Risk:
-  Reversible while the code is what git HEAD holds: the Policy Gate allows
-  the run with an audit record. The tool runs arbitrary Python code, so a
-  run that would execute code nobody committed — a file that is untracked
-  or changed since HEAD, or a git-ignored test target — is `irreversible`
-  and waits for human approval (`risk_for`). Without git or outside a
-  repository there is no baseline and the class stays `reversible`.
-"""
+"""run_tests tool: run pytest in the workspace and return structured results."""
 from __future__ import annotations
 
 import posixpath
@@ -45,13 +16,7 @@ from tools.base import Risk, Tool, require_ascii_identifier
 # Constants
 # ---------------------------------------------------------------------------
 
-#: Full-suite wall time measured on this repository, warm caches, five runs:
-#: 327, 333, 339, 390, 411 s against 7262 collected tests. The budget bounds a
-#: HANG, not the duration, and the costs are asymmetric -- too low and health can
-#: never be established at all, too high and a hang is merely noticed later while
-#: `timed_out -> inconclusive` still refuses to call a partial run green. So it
-#: clears the worst measurement by a margin wide enough for a cold bytecode cache
-#: and a busy machine: twice 411 s, rounded up.
+#: Bounds a hang, not the duration: about twice the slowest measured full-suite run.
 DEFAULT_TIMEOUT_SECONDS = 900.0
 MAX_STDOUT_BYTES = 1 * 1024 * 1024  # 1 MiB
 MAX_STDERR_BYTES = 1 * 1024 * 1024
@@ -174,11 +139,7 @@ class RunTestsTool(Tool):
         return "irreversible" if unreviewed else "reversible"
 
     def _runs_unreviewed_code(self, paths: Any) -> bool:
-        """True when git reports code that is untracked, changed or ignored-but-targeted.
-
-        Without git or outside a repository there is no baseline to compare
-        with, and the class stays `reversible`.
-        """
+        """True if git shows untracked, changed or ignored-but-targeted code; False without git."""
         from tools.shell_exec import trusted_which
 
         git = trusted_which("git", self.workspace_root)
@@ -255,8 +216,7 @@ class RunTestsTool(Tool):
         stdout = self._decode_and_cap(stdout_b, MAX_STDOUT_BYTES)
         stderr = self._decode_and_cap(stderr_b, MAX_STDERR_BYTES)
 
-        # Late-stage redaction so a credential leaked by a test never
-        # lands in audit logs / planner context / model prompts.
+        # Redact so a credential printed by a test never reaches logs or model prompts.
         from core.redaction import redact_text  # avoid module-level cycle
 
         stdout_safe, _ = redact_text(stdout["text"])
@@ -264,9 +224,7 @@ class RunTestsTool(Tool):
 
         counts = self._parse_counts(stdout_safe + "\n" + stderr_safe)
         failed_tests = self._parse_failed_names(stdout_safe)
-        # On timeout, pytest usually never prints the short-test summary, so
-        # progress-bar "F" glyphs are unreliable. Prefer empty failed_tests
-        # over a partial/misleading list unless we already have named fails.
+        # On timeout the progress-bar F glyphs are unreliable; keep only named failures.
         if timed_out and not failed_tests:
             counts = {
                 "passed": counts["passed"],
@@ -276,8 +234,7 @@ class RunTestsTool(Tool):
                 "total": counts["passed"] + counts["skipped"],
             }
 
-        # Bound the audit-log size: only keep the last few KB of stdout
-        # (mostly pytest's "short test summary" + traceback tails).
+        # Keep only the stdout tail (summary and tracebacks) to bound the audit log.
         tail_chars = 4000
         stdout_tail = stdout_safe[-tail_chars:] if len(stdout_safe) > tail_chars else stdout_safe
         if timed_out:
@@ -287,10 +244,7 @@ class RunTestsTool(Tool):
 
         return {
             "command": argv,
-            # Какой именно код проверяли. Без этого «тест упал» неотличимо от
-            # «упал в моей устаревшей копии» — живой прогон 2026-08-03, где
-            # красная строка из отставшей копии была доложена как дефект
-            # проекта и прошла проверку (core/code_state.py).
+            # Which code was tested: a failure in a stale copy is not a project defect.
             "code_state": describe_code_state(self.workspace_root),
             "exit_code": exit_code,
             "timed_out": timed_out,
@@ -306,8 +260,7 @@ class RunTestsTool(Tool):
             "stderr_truncated": stderr["truncated"],
             "stdout_tail": stdout_tail,
             "stderr_tail": stderr_safe[-tail_chars:] if len(stderr_safe) > tail_chars else stderr_safe,
-            # MVP-11 contract: every tool that runs returns a compensation
-            # plan (even if noop) so the registry stays uniform.
+            # Every tool returns a compensation plan, here a no-op, so the registry stays uniform.
             "compensation_plan": {
                 "id": "noop",
                 "actions": [{"kind": "noop", "description": "test run has no compensation"}],
@@ -342,8 +295,7 @@ class RunTestsTool(Tool):
         for k in ("passed", "failed", "errors", "skipped", "total"):
             if not isinstance(output[k], int) or output[k] < 0:
                 return False, [f"{k} must be a non-negative int"]
-        # total >= passed + failed + errors + skipped (errors may be
-        # double-counted by pytest as failed; allow >=, not strict ==)
+        # Errors may be double-counted as failures, so only require total >= the counted outcomes.
         if output["total"] < output["passed"] + output["failed"] + output["skipped"]:
             return False, ["total smaller than counted outcomes"]
         if not isinstance(output["failed_tests"], list):
@@ -380,15 +332,11 @@ class RunTestsTool(Tool):
                 raise ValueError(f"too many paths (max {MAX_PATHS})")
             for i, p in enumerate(paths):
                 require_ascii_identifier(p, role=f"run_tests paths[{i}]")
-                # A leading dash makes pytest read the element as an OPTION,
-                # not a path: `-p <module>` imports arbitrary code. Refused by
-                # shape, because the dangerous set is whatever the installed
-                # pytest accepts.
+                # A leading dash is read as an option (`-p <module>` imports code); refuse by shape.
                 if p.startswith("-"):
                     raise PermissionError(
                         f"paths[{i}]={p!r} starts with '-' — refused"
                     )
-                # Reject any path containing parent-traversal segments.
                 if ".." in Path(p).parts:
                     raise PermissionError(
                         f"paths[{i}] contains '..' — refused"
@@ -419,21 +367,12 @@ class RunTestsTool(Tool):
 
     @staticmethod
     def _build_env() -> dict[str, str]:
-        """Minimal env: keep PATH for the python interpreter to find
-        plugins, force UTF-8 I/O so Windows test output isn't mojibake.
-        Also forwards all AGENT_* variables so the subprocess inherits
-        the provider / budget settings from the parent process."""
+        """Minimal env: PATH and friends, all AGENT_* settings, and forced UTF-8 output."""
         import os
 
         keep_keys = (
             "PATH",
-            # Without PATHEXT, Windows cannot turn the NAME `python` into
-            # `python.exe`, so any test that resolves an executable by name
-            # fails only inside this subprocess. Measured 2026-08-04: the agent
-            # ran the suite through this tool and reported two failures the
-            # operator's terminal did not have. A test tool whose verdict
-            # depends on who launched it makes the agent's own verification
-            # worthless exactly when it matters.
+            # Without PATHEXT, Windows cannot resolve `python` to `python.exe` in the subprocess.
             "PATHEXT",
             "PYTHONPATH",
             "SYSTEMROOT",
@@ -443,10 +382,8 @@ class RunTestsTool(Tool):
             "USERPROFILE",
         )
         env = {k: os.environ[k] for k in keep_keys if k in os.environ}
-        # Forward all AGENT_* env vars (provider, model, budget, etc.)
-        # Exclude AGENT_TEST_TIMEOUT_SECONDS — it's a meta-setting for the
-        # tool itself and should not propagate into nested test subprocesses
-        # (otherwise tests that check the default timeout would break).
+        # Forward AGENT_* settings, except the tool's own timeout, which would break
+        # tests that check the default.
         _skip = {"AGENT_TEST_TIMEOUT_SECONDS"}
         for k, v in os.environ.items():
             if k.startswith("AGENT_") and k not in _skip:
@@ -501,11 +438,7 @@ class RunTestsTool(Tool):
 
     @staticmethod
     def _parse_failed_names(text: str) -> list[str]:
-        """Extract `FAILED tests/foo.py::Klass::test_bar` lines.
-
-        pytest in -q mode emits these under the "short test summary
-        info" footer. We grep for the FAILED token at line start.
-        """
+        """Names from the `FAILED ...` and `ERROR ...` lines of pytest's short summary."""
         names: list[str] = []
         for line in text.splitlines():
             stripped = line.strip()

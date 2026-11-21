@@ -1,7 +1,4 @@
-"""File Read tool — sandboxed to the workspace root.
-
-Refuses path traversal and oversized files. Returns plain text.
-"""
+"""File Read tool — sandboxed to the workspace root."""
 from __future__ import annotations
 
 import difflib
@@ -15,12 +12,8 @@ _WINDOW_MAX_BYTES = 50_000_000  # a start_line/end_line window of a larger file
 _MAX_HINT_ENTRIES = 40  # cap the "did you mean" listing so error stays compact
 _DEFAULT_WINDOW_LINES = 60  # start_line without end_line: enough for a function
 
-#: Credential-shaped paths this tool refuses to READ. The self-apply lane
-#: already refused to WRITE these (`core/self_apply_lane._is_denied`); measured
-#: 2026-08-22, nothing consulted a denylist on the read side, so
-#: `file_read(".env")` returned the whole credential file. Same shapes, both
-#: directions. Matching is on the resolved RELATIVE path, so a directory named
-#: `secrets/` is covered wherever it sits inside the workspace.
+#: Credential-shaped paths refused on read, as the self-apply lane refuses them on write.
+#: Matched on the resolved relative path, so a secrets/ directory is covered anywhere inside.
 _CRED_NAMES = frozenset({
     "credentials", "credentials.json", "id_rsa", "id_dsa", "id_ecdsa",
     "id_ed25519", ".netrc", ".npmrc", ".pgpass", ".htpasswd",
@@ -32,13 +25,9 @@ _CRED_DIRS = ("secrets/", ".ssh/", ".gnupg/")
 def _is_credential_path(rel: str) -> bool:
     """True when the relative path names a credential store rather than work.
 
-    Deliberately narrow: it must not become a second wall around the workspace.
-    `.env` matches by name or as a prefix (`.env.local`), never as a substring —
-    `environment.md` and `tests/test_env_probe.py` stay readable.
+    Deliberately narrow: `.env` matches by name or prefix (`.env.local`), never as a substring.
     """
-    # NOT `lstrip("./")`: lstrip removes CHARACTERS, so it turns ".env" into
-    # "env" and the name check silently misses the very file this gate exists
-    # for. Measured while building this gate, 2026-08-22.
+    # Not lstrip("./"): it strips characters and would turn ".env" into "env".
     lower = rel.replace("\\", "/").lower()
     while lower.startswith("./"):
         lower = lower[2:]
@@ -57,12 +46,8 @@ def _line_window(
 ) -> tuple[int, int] | None:
     """Validate the optional (start, end) window; None means the whole file.
 
-    Why a window at all: over its ceiling (12 000 chars then, 96 000 since
-    2026-09-21) the evidence budget keeps only a keyword-chosen excerpt of a
-    file. Measured 2026-09-05, three turns running: the agent
-    found `core/loop_attempt.py:208` with findstr and then could not read
-    line 208, because the whole-file read never contained it. A line the
-    caller can name is a line the tool must be able to hand back.
+    The evidence budget keeps only an excerpt of a long file, so a line the caller can name
+    must be readable on its own.
     """
     if start_line is None and end_line is None:
         return None
@@ -83,8 +68,7 @@ def _line_window(
 def _slice_lines(text: str, start: int, end: int, *, name: str) -> str:
     """Lines start..end (1-based, inclusive), each prefixed with its number.
 
-    A window past the end of the file is an error, not an empty string: an
-    empty answer to "show me line 900" would read as "line 900 is blank".
+    A window past the end is an error: an empty answer would read as "the line is blank".
     """
     lines = text.splitlines()
     total = len(lines)
@@ -168,9 +152,7 @@ class FileReadTool(Tool):
         start_line: int | None = None,
         end_line: int | None = None,
     ) -> str:
-        # Read-only file access may target user-supplied local documents
-        # with non-ASCII names. We still keep the sandbox boundary strict:
-        # path must be a non-empty string and must resolve inside workspace.
+        # Non-ASCII names are fine; the path must be a non-empty string inside the workspace.
         if not isinstance(path, str):
             raise PermissionError(
                 f"file_read path must be a string, got {type(path).__name__}"
@@ -178,12 +160,10 @@ class FileReadTool(Tool):
         if not path.strip():
             raise PermissionError("file_read path must be non-empty")
         window = _line_window(start_line, end_line)
-        # Заготовка вместо адреса — не «файл не найден», а недостроенный план:
-        # см. core/placeholder_text и docs/CODE_NOTES.md.
+        # A template where an address belongs is an unfinished plan, not a missing file.
         from core.placeholder_text import looks_like_unfilled_path
 
-        # base_dir несёт факт существования: реальный файл — всегда адрес,
-        # что бы ни значилось в его имени (контракт агента, груз №2).
+        # base_dir makes an existing file an address whatever its name looks like.
         if looks_like_unfilled_path(path, base_dir=str(self.workspace_root)):
             raise ValueError(
                 f"refusing to read an unfilled placeholder path: {path!r} — "
@@ -195,10 +175,8 @@ class FileReadTool(Tool):
             if local_path.is_absolute()
             else (self.workspace_root / local_path).resolve()
         )
-        # Credential gate: checked on the RESOLVED path, so `docs/../.env` and an
-        # absolute route to the same file are refused alike. The message names
-        # the kind, never the contents — a refusal that quotes the secret it
-        # protects would defeat itself.
+        # Credential gate on the resolved path (docs/../.env is refused too); the message
+        # names the kind of file, never its contents.
         try:
             rel_for_gate = str(target.relative_to(self.workspace_root))
         except ValueError:
@@ -217,20 +195,15 @@ class FileReadTool(Tool):
         if not target.exists():
             raise FileNotFoundError(
                 f"File not found: {target}"
-                # Подсказка про урезанное имя ОТВЕЧАЕТ на вопрос целиком;
-                # список папки после неё — стена текста без пользы (в logs/
-                # лежит 370 следов). Список остаётся, когда продолжения нет.
+                # A truncated-name hint answers fully; the directory listing is the fallback.
                 + (truncated_name_hint(self.workspace_root, target)
                    or self._nearest_dir_hint(target))
             )
         if not target.is_file():
             raise IsADirectoryError(f"Not a file: {target}")
 
-        # Предел защищает от чтения ЦЕЛИКОМ: такой текст всё равно был бы
-        # обрезан бюджетом улик. Окно строк безопасно при любом размере.
-        # Замер 2026-09-19 (опыт с библиотекой книг): Erickson_Algorithms.txt
-        # (1.1 МБ) — findstr нашёл строку 14849, а окно 14820-14880 отказало
-        # «File too large»; треть книг библиотеки крупнее 1 МБ.
+        # MAX_BYTES limits whole-file reads only (the evidence budget would cut them anyway);
+        # a line window is allowed up to _WINDOW_MAX_BYTES.
         size = target.stat().st_size
         if size > MAX_BYTES and window is None:
             raise ValueError(
@@ -241,8 +214,7 @@ class FileReadTool(Tool):
         if size > _WINDOW_MAX_BYTES:
             raise ValueError(f"File too large ({size} bytes > {_WINDOW_MAX_BYTES})")
 
-        # Strict UTF-8: a binary or wrong-encoding file must fail loudly so
-        # the loop classifies it as a tool error, not as silently-garbled text.
+        # Strict UTF-8: a binary file must fail as a tool error, not come back garbled.
         try:
             text = target.read_text(encoding="utf-8", errors="strict")
         except UnicodeDecodeError as exc:

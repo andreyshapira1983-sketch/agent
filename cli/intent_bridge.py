@@ -1,30 +1,7 @@
-"""The bridge from plain operator language to an explicit command.
-
-An operator does not have to type ``:commands``. A message is first run through a
-**deterministic, no-LLM** matcher (``core.operator_intent``); on a positive match
-for one of the softer status/capability intents the model is asked whether the
-message is really a request, and it may only **cancel** the routing -- kernel
-decides, model advises. Anything unmatched falls through to the normal agent loop
-untouched.
-
-A route answers *instead of* the loop, never *outside the conversation*:
-``_record_routed_turn`` puts the exchange into the session record, because the
-loop tail that normally writes it never runs here.
-
-Extracted verbatim from ``main.py``. Import these names from here: the
-``main.py`` re-exports that used to mirror them were removed in Phase 7, and a
-fake for any of them belongs on this module, where the call sites resolve it.
-
-Note for anyone stubbing these in a test: the functions resolve each other in
-**this** module's namespace, so a stand-in has to replace the name here, not on
-``main``.
-
-``_local_operator_reply`` is the narrow no-LLM path: an explicit "reply only
-with: ..." instruction that also forbids planner/synthesizer is answered locally
-and never reaches a model.
-"""
+"""Routes plain operator language to an explicit command; the model may only veto a match."""
 from __future__ import annotations
 
+# The functions resolve each other in this module, so tests must patch names here, not on main.
 import re
 import sys
 from typing import TYPE_CHECKING
@@ -78,13 +55,7 @@ _REPLY_ONLY_STOP_RE = re.compile(
 
 
 def _local_operator_reply(text: str, agent: AgentLoop | None = None) -> str | None:
-    """Return a local response for explicit stop/ack operator instructions.
-
-    TD-001: some operator-control messages are intentionally local and must not
-    enter Planner/Synthesizer. Keep this narrow: only honour a quoted
-    "Reply only with:" directive when the same instruction explicitly forbids
-    the expensive model path.
-    """
+    """Answer a quoted "Reply only with:" locally, only if the message also forbids the model."""
     normalized = " ".join((text or "").casefold().split())
     if "reply only with:" not in normalized:
         return None
@@ -115,12 +86,7 @@ def _local_operator_reply(text: str, agent: AgentLoop | None = None) -> str | No
 
 
 def _record_routed_turn(agent: AgentLoop, question: str, answer: str) -> None:
-    """Ход, отвеченный в обход цикла, всё равно принадлежит истории сессии.
-
-    Историю пишет хвост прогона; отвечая здесь, мы этот хвост не запускаем — и
-    сообщение оператора исчезало вместе с фактом, что на него ответили
-    (`docs/CODE_NOTES.md`, «Маршрут ответил — и стёр ход»).
-    """
+    """Put a routed turn into session history; the loop tail that writes it never runs here."""
     memory = getattr(agent, "memory", None)
     if memory is None:
         return
@@ -129,7 +95,7 @@ def _record_routed_turn(agent: AgentLoop, question: str, answer: str) -> None:
             question=question, planner_reasoning="", tools_used=[],
             artifact_labels=[], answer=answer,
         )
-    except Exception as exc:  # noqa: BLE001 — потеря хода видна, а не молчалива
+    except Exception as exc:  # noqa: BLE001 — a lost turn is journaled, never silent
         agent.log.log("routed_turn_not_recorded", {"error": repr(exc)})
         return
     agent.log.log(
@@ -149,48 +115,27 @@ def _handle_local_operator_reply(text: str, agent: AgentLoop) -> bool:
     return True
 
 
-# Every intent a free-text utterance can reach. The keyword table PROPOSES a
-# candidate; the model sees the original text plus that candidate and may veto
-# it. Lexis is a sensor here, never the judge of meaning — a colon-prefixed
-# token is machine syntax and keeps its deterministic parser instead.
-#
-# Extending the gate is monotone-safe: `_model_says_conversation` returns False
-# on any uncertainty, so a model error or a missing model leaves the old
-# deterministic route in place.
-#
-# Membership is checked against the declared kinds by
-# tests/test_no_free_text_intent_routes_on_words_alone.py, so a new intent
-# cannot quietly arrive ungated.
+# Free-text intents the model may veto: a keyword match only proposes, and on any
+# model uncertainty the deterministic route stands.
 _VERIFY_INTENTS: frozenset[str] = frozenset({
-    # status / capability, which conversational phrasing trips easily
+    # status / capability, easily tripped by conversational phrasing
     "capability_check", "project_health", "smart_memory_status",
     "current_gaps_check", "weakness_finder", "next_safe_test",
     "best_next_action", "next_actions", "autonomy_readiness",
     "model_status", "budget_status", "approval_status", "urgent_status",
-    # imperatives, gated 2026-08-20 by operator ruling
+    # imperatives
     "architecture_audit", "capability_request", "implementation_plan",
     "patch_proposal", "programming_readiness", "safe_self_check",
     "self_build_request", "self_task_proposal",
     "source_review_plan", "subagent_proposal",
 })
 
-# `shell_command_hint` stays ungated, and it is the ruling's own exception
-# rather than a leftover: it fires on MACHINE syntax — a pasted shell line —
-# not on human language, and its whole effect is printing "run this in
-# PowerShell". Nothing operational is acquired, so there is no intent for the
-# model to adjudicate.
+# Machine syntax (a pasted shell line) that only prints a hint: nothing for the model to veto.
 _UNGATED_MACHINE_SYNTAX: frozenset[str] = frozenset({"shell_command_hint"})
 
 
 def _model_says_conversation(text: str, intent: OperatorIntent, agent: AgentLoop) -> bool:
-    """True only when the model gives a CLEAR, parseable "this is conversation"
-    verdict for a soft keyword match.
-
-    On a confirmed action, or any uncertainty (model error / unparseable /
-    ungrounded / low confidence / no model), returns False — so deterministic
-    routing is preserved and the model only ever *vetoes* an obvious
-    conversational false-positive (model advises, kernel decides).
-    """
+    """True only on a clear model verdict "conversation"; any uncertainty keeps the route."""
     try:
         llm = agent.model_router.for_role(ModelRole.PLANNER)
     except Exception:  # noqa: BLE001 — no model to consult -> keep routing
@@ -200,15 +145,12 @@ def _model_says_conversation(text: str, intent: OperatorIntent, agent: AgentLoop
 
 
 def _start_persistent_goal(text: str, agent: AgentLoop, workspace: Path) -> bool:
-    """A spoken ongoing goal enters the C16 lane: the runtime task queue,
-    which daemon/scheduler ticks consume. Reversible by «останови …»."""
+    """Queue a spoken ongoing goal for daemon/scheduler ticks; «останови …» reverses it."""
     from app.task_scheduler_cli import _task_queue_for
 
     task = _task_queue_for(agent, workspace).add(goal=text.strip())
     agent.log.log("runtime_task_added", task.to_dict())
-    # The goal is echoed IN FULL on purpose: the console once glued a paste
-    # tail to a typed order («…выдумка.Начни…», trace_68084781) and the
-    # operator had no way to see what the queue actually stored.
+    # Echoed in full, so the operator sees exactly what the queue stored.
     print(
         f"(цель принята в работу: {task.id}; повезёт автомат — очередь задач "
         f"C16, dry_run={task.dry_run}.\n Понял так: «{task.goal}»\n "
@@ -219,8 +161,7 @@ def _start_persistent_goal(text: str, agent: AgentLoop, workspace: Path) -> bool
 
 
 def _control_work_goals(text: str, agent: AgentLoop, workspace: Path) -> bool:
-    """Cancel queued/blocked work whose goal shares words with the order;
-    an empty match is reported honestly, nothing is guessed."""
+    """Cancel pending/blocked work whose goal shares words with the order; never guess."""
     from app.task_scheduler_cli import _task_queue_for
 
     queue = _task_queue_for(agent, workspace)
@@ -259,8 +200,7 @@ def _goal_tokens(text: str) -> set[str]:
 
 
 def _tokens_overlap(a: set[str], b: set[str]) -> bool:
-    """Shared 6-char prefix counts: «программированию» must find
-    «программировать» — Russian inflection, not different subjects."""
+    """A shared 6-char prefix counts, so Russian inflections of one word match."""
     return any(
         x[:6] == y[:6] for x in a for y in b if len(x) >= 6 and len(y) >= 6
     )
@@ -272,9 +212,7 @@ def handle_conversational_operator_input(text: str, agent: AgentLoop, workspace:
         "strategy_classified",
         {"strategy": strategy.value, "text_preview": text[:120]},
     )
-    # The door must not choose the mind: activity type is decided BEFORE
-    # channel semantics. persistent_goal/goal_control are handled here;
-    # conversation/bounded_action fall through to the pinned routes.
+    # Activity is decided before channel semantics; conversation/bounded_action fall through.
     from core.activity_decider import decide_activity
 
     decision = decide_activity(text)
@@ -289,9 +227,7 @@ def handle_conversational_operator_input(text: str, agent: AgentLoop, workspace:
     intent = route_operator_intent(text)
     if intent is None:
         return False
-    # Bridge: for a soft match, let the model VETO an obvious conversational
-    # false-positive. It only suppresses on a clear "this is conversation"
-    # verdict; on uncertainty the deterministic route is preserved.
+    # A soft match may be vetoed by the model as an obvious conversational false positive.
     if intent.kind in _VERIFY_INTENTS and _model_says_conversation(text, intent, agent):
         agent.log.log(
             "operator_intent_suppressed",
@@ -312,9 +248,8 @@ def handle_conversational_operator_input(text: str, agent: AgentLoop, workspace:
     )
     handled = _dispatch_operator_intent(intent, agent, workspace, original_text=text)
     if handled:
-        # Не тело отчёта, а ФАКТ: о чём спросили и какая команда ответила.
-        # Тело печатают обработчики в stdout, и перехват вывода сломал бы те из
-        # них, что ждут ввода оператора.
+        # Only the fact (question, answering command), not the output: capturing
+        # stdout would break handlers that wait for operator input.
         _record_routed_turn(
             agent, text,
             f"(ответ дан локальной командой {intent.command}; "

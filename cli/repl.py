@@ -1,11 +1,4 @@
-"""Interactive REPL input: one owner for stdin, and the dialogue loop.
-
-:class:`_StdinLineReader` is the ONLY consumer of stdin — the top-level
-prompt, the block modes and the approval prompt all pull from its queue, so
-they cannot race. :func:`run_repl` is the loop: input modes, ``:command``
-dispatch, the intent router, the rate-limit check, the agent call. Startup
-wiring lives in ``cli/app.py``, which calls this.
-"""
+"""Interactive REPL: the single stdin reader and the dialogue loop."""
 from __future__ import annotations
 
 import queue
@@ -18,7 +11,7 @@ from app import budget_guard, operator_task
 from cli import command_dispatch, intent_bridge
 from core.loop import format_human_response
 
-if TYPE_CHECKING:  # annotation only -- it was an unresolved string in main.py
+if TYPE_CHECKING:  # annotation only
     from io import TextIOBase
     from pathlib import Path
 
@@ -53,9 +46,8 @@ def _collect_pasted_block(read_line: Callable[[], str]) -> str:
     return "\n".join(parts).strip()
 
 
-#: Max wait for the NEXT line before a burst counts as over. A paste delivers
-#: its lines in microseconds, a human takes far longer — that gap is the whole
-#: mechanism, so this value is a contract, not a tuning knob.
+#: Max wait for the next line of a burst: a paste arrives in microseconds, a human far slower.
+#: That gap is the whole mechanism, so the value is a contract, not a tuning knob.
 PASTE_COALESCE_GAP_SECONDS = 0.05
 
 
@@ -86,11 +78,7 @@ def _coalesce_burst(
     read_first: Callable[[], str],
     read_next: Callable[[], str | None],
 ) -> str:
-    """Join a back-to-back burst of input lines into one message.
-
-    ``read_first`` blocks and may raise ``EOFError``/``KeyboardInterrupt``, which
-    propagate; ``read_next`` returns ``None`` once the burst is over.
-    """
+    """Join a back-to-back burst of lines into one message; read_next returns None at its end."""
     parts = [read_first()]
     while True:
         nxt = read_next()
@@ -101,10 +89,9 @@ def _coalesce_burst(
 
 
 class _StdinLineReader:
-    """Single-owner, thread-backed line reader for the interactive REPL.
+    """Sole stdin owner: a daemon thread reads, callers pull lines with a timeout.
 
-    A daemon thread does the blocking reads so the main thread can pull lines
-    with a timeout, which is what makes paste coalescing possible.
+    The top-level prompt, block modes and approval prompt all read from its queue, so none race.
     """
 
     _EOF = object()
@@ -124,8 +111,7 @@ class _StdinLineReader:
         self._q: queue.Queue[object] = queue.Queue()
         self._started = False
         self._lock = threading.Lock()
-        #: What ended the pump, or None if input simply ran out. Both surface as
-        #: EOFError to the caller; this is what tells them apart.
+        #: The read failure that ended the pump (None on plain EOF); both reach callers as EOFError.
         self.read_error: BaseException | None = None
 
     def _ensure_started(self) -> None:
@@ -140,8 +126,7 @@ class _StdinLineReader:
             try:
                 line = self._readline()
             except Exception as exc:  # noqa: BLE001 — a reader thread may not die loudly
-                # A thread that cannot read stdin has nothing left to do, so it
-                # ends here; the reason survives in `read_error`.
+                # Nothing is left to do without stdin; the reason survives in read_error.
                 self.read_error = exc
                 self._report_read_failure(exc)
                 self._q.put(self._EOF)
@@ -152,10 +137,9 @@ class _StdinLineReader:
             self._q.put(line.rstrip("\n").rstrip("\r"))
 
     def _report_read_failure(self, exc: BaseException) -> None:
-        """Say once, on stderr, that input ended by failure and not by EOF.
+        """Say once on stderr that input ended by failure, not EOF.
 
-        Guarded: a reader thread that raises while reporting would leave the
-        queue without its EOF and hang the session.
+        Guarded: raising here would leave the queue without its EOF and hang the session.
         """
         try:
             print(
@@ -168,8 +152,7 @@ class _StdinLineReader:
             pass  # nosec B110 — see docstring: the queue must still get its EOF
 
     def read_line(self, timeout: float | None = None) -> str:
-        """Return the next line. Raises EOFError at end of input, or
-        ``queue.Empty`` when ``timeout`` elapses with nothing available."""
+        """Return the next line; raise EOFError at end of input, queue.Empty on timeout."""
         self._ensure_started()
         item = self._q.get(timeout=timeout)  # may raise queue.Empty
         if item is self._EOF:
@@ -182,9 +165,7 @@ class _StdinLineReader:
             self._out.write(prompt)
             self._out.flush()
         except (OSError, ValueError):
-            # A broken stdout must not stop input from being read. Narrow on
-            # purpose: those two are a broken console, anything else is a bug
-            # here and belongs to the caller.
+            # A broken console must not stop input; any other error is a bug for the caller.
             pass
 
     def prompt_line(self, prompt: str) -> str:
@@ -193,11 +174,7 @@ class _StdinLineReader:
         return self.read_line()
 
     def read_message(self, prompt: str) -> str:
-        """Read one logical message, coalescing a pasted multi-line burst.
-
-        Non-interactive input (pipes, tests) is read strictly one line at a
-        time so scripted command streams keep their original semantics.
-        """
+        """Read one message, coalescing a pasted burst; piped input stays one line per message."""
         self._write_prompt(prompt)
         if not self._interactive:
             return self.read_line()
@@ -241,20 +218,17 @@ def _ask_the_agent(
     print("\n" + _judged_human_reply(agent, question, answer) + "\n")
 
 
-#: Недавние пары (вопрос, ответ) этого процесса — для правила «не повторяйся
-#: без спроса» (ступень 1 разговора; нить между процессами — ступень 2).
+#: Recent (question, answer) pairs of this process, for the "do not repeat unasked" rule.
 _RECENT_REPLIES: list[tuple[str, str]] = []
 _RECENT_REPLIES_KEEP = 8
 
 
 def _judged_human_reply(agent: object, question: str, answer: str) -> str:
-    """Судья разговора между переводчиком и печатью (ступень 1, MIR/записка
-    docs/audit/CONVERSATION_ORGAN_DESIGN.md): на человеческую фразу —
-    человеческий ответ; дубль — молчание; каждый не-ok вердикт — в журнал."""
+    """Judge the reply before printing: a human phrase gets a human answer, a repeat silence."""
     from core.conversation_contract import judge_reply
 
-    # Судья смотрит на СЫРОЙ ответ (в нём секции контракта — приметы отчёта);
-    # переводчик остаётся способом показа, когда вердикт ok.
+    # The judge reads the RAW answer (contract sections mark a report); the formatted
+    # reply is what gets shown when the verdict is ok.
     judgement = judge_reply(question, answer, tuple(_RECENT_REPLIES))
     reply = format_human_response(answer)
     log = getattr(agent, "log", None)
@@ -265,7 +239,7 @@ def _judged_human_reply(agent: object, question: str, answer: str) -> str:
                 "reasons": list(judgement.reasons),
                 "observations": list(judgement.observations),
             })
-        except Exception:  # noqa: BLE001, S110 — журнал не роняет разговор
+        except Exception:  # noqa: BLE001, S110 — the journal must not break the conversation
             pass
     if judgement.verdict == "trim" and judgement.human_reply:
         reply = judgement.human_reply
@@ -279,11 +253,9 @@ def _judged_human_reply(agent: object, question: str, answer: str) -> str:
 
 
 def _stdin_is_interactive() -> bool:
-    """True when stdin is a terminal — the condition for paste coalescing.
+    """True when stdin is a terminal (the condition for paste coalescing).
 
-    No stdin at all (``pythonw.exe``), a closed stream and a dead descriptor are
-    one answer: no console. Anything else is a bug here and must reach the
-    caller, not be answered with a quiet "not interactive".
+    No stdin (pythonw.exe), a closed stream or a dead descriptor: no console; other errors raise.
     """
     stream = sys.stdin
     if stream is None:
@@ -297,10 +269,9 @@ def _stdin_is_interactive() -> bool:
 def _run_handler(
     agent: object, label: str, handler: Callable[..., object], *args: object, **kwargs: object,
 ) -> object:
-    """Run one handler or the agent call; its crash is reported in one line, not raised.
+    """Run one handler or the agent call; a crash is reported in one line, not raised.
 
-    Returns True (handled) on a crash so the text is not passed on to the agent.
-    KeyboardInterrupt and SystemExit are not Exception and pass through.
+    A crash returns True (handled) so the text is not passed on to the agent.
     """
     try:
         return handler(*args, **kwargs)
@@ -316,9 +287,8 @@ def _run_handler(
         return True
 
 
-# The order of the checks in the loop below is pinned by the characterization
-# suites; the collaborators are called through their MODULE so one
-# monkeypatch is seen from here and from cli/one_shot.py alike.
+# The check order below is pinned by the characterization tests; collaborators are called
+# through their module so one monkeypatch is seen here and in cli/one_shot.py alike.
 
 
 def run_repl(
@@ -337,9 +307,7 @@ def run_repl(
             print()
             return 0
         if not q:
-            # An empty Enter must NOT exit: a paste whose first line is blank
-            # would drop the operator into the parent shell, which then runs the
-            # rest of the paste as commands. Leave with :quit / Ctrl+C / EOF.
+            # An empty Enter must not exit: the parent shell would run the rest of a paste.
             continue
         # Mode 1: an explicit block, <<< … >>>, for pasting text with newlines.
         if q == "<<<":
@@ -360,8 +328,7 @@ def run_repl(
                 print()
                 return 0
             if not q:
-                # The same refusal the other two paths make: an empty message
-                # costs a rate-limit token and asks the agent nothing.
+                # An empty message would spend a rate-limit token and ask nothing.
                 continue
         if q == ":operator-task":
             print("(operator task block started; finish with :end)", file=sys.stderr)
@@ -375,9 +342,8 @@ def run_repl(
                 operator_task._handle_operator_task, block, agent, workspace,
             )
             continue
-        # :task-begin … :task-end goes STRAIGHT to the agent, bypassing the
-        # keyword router — the reliable way to send wording that a shortcut
-        # would otherwise hijack (text merely mentioning budget or approval).
+        # The buffer goes straight to the agent, bypassing the keyword router, so text that
+        # merely mentions budget or approval is not hijacked by a shortcut.
         if q == ":task-begin":
             print(
                 "(instruction buffer started; finish with :task-end, "
@@ -424,7 +390,6 @@ def run_repl(
             intent_bridge.handle_conversational_operator_input, q, agent, workspace,
         ):
             continue
-        # ── Rate-limit check, then the agent ─────────────────────────────────
         _run_handler(
             agent, "agent run", _ask_the_agent, agent, q,
             rate_limiter=rate_limiter, workspace=workspace, file_hint=file_hint,

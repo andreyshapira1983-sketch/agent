@@ -1,24 +1,4 @@
-"""MVP-13.1 — `read_logs` tool: structured JSONL audit reader.
-
-The agent's primary signal for self-diagnosis is its own JSONL audit
-log. This tool exposes recent events to the planner in a safe,
-bounded shape so the LLM can answer questions like "what was the last
-error?" or "did the previous run hit an approval_deny?" without
-needing to grep raw files.
-
-Safety:
-  - The tool ONLY reads from `<workspace_root>/logs/`. No traversal.
-  - `last_n` is hard-capped to keep payloads bounded.
-  - Each returned event passes through `redact_payload` again before
-    leaving the tool — the logger already redacts on the way in, so
-    this is defence-in-depth.
-  - File names must match the trace-id pattern that `TraceLogger`
-    writes; anything else is refused so the tool cannot be coerced
-    into reading arbitrary `.jsonl` blobs an attacker might drop into
-    `logs/`.
-
-Risk: read_only.
-"""
+"""`read_logs` tool: bounded, redacted reader of the agent's own JSONL audit logs."""
 from __future__ import annotations
 
 import json
@@ -28,43 +8,23 @@ from typing import Any
 
 from tools.base import Risk, Tool, require_ascii_identifier
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
 DEFAULT_LAST_N = 50
 MAX_LAST_N = 500
 MAX_EVENT_FILTER = 20      # how many distinct event names a caller may filter on
 
-# Longest a single payload field may be on the way out, in JSON characters.
-# Measured 2026-09-05 (exam turn 36): the agent read its own trace without a
-# filter, 217 events came back as 1.24 MB — each earlier `read_logs` result
-# was nested whole inside its `tool_result.output` — and the evidence budget
-# kept ~12 000 characters, none of them the planner warnings it was after.
-# A field over the cap is replaced by a marked preview; the event itself and
-# every short field stay intact.
+# Longest payload field returned, in JSON characters; a longer one becomes a marked preview.
 MAX_FIELD_CHARS = 4_000
 
-# Accepting a wider safe pattern than `core.ids.new_trace_id` currently emits
-# keeps an explicitly-passed trace_id resilient to a format change.
+# Wider than what core.ids.new_trace_id emits, so an explicit trace_id survives a format change.
 _TRACE_ID_FILENAME_RE = re.compile(r"^[a-zA-Z0-9_-]+\.jsonl$")
 
-# Which files in `logs/` TraceLogger itself wrote. `core.ids.new_trace_id` emits
-# `trace_<hex>`; `run_<hex>` is the pre-2026-08-10 name and is still on disk.
-# Everything else there (checkpoints_*, daemon_tick, ad-hoc captures) is another
-# store, and picking one to diagnose from reports the wrong subsystem.
+# Session logs TraceLogger wrote: trace_<hex>, and the older run_<hex> still on disk.
+# Other files in logs/ are other stores and would diagnose the wrong subsystem.
 _SESSION_LOG_STEM_RE = re.compile(r"^(?:trace|run)_[0-9a-zA-Z]+$")
 
-# Сколько прошлых трасс просматривается в поисках запрошенных событий, прежде
-# чем честно сказать «в недавней истории этого нет». Ограничение держит вызов
-# ограниченным по работе: дальше вглубь — это уже археология, и ей положено
-# идти через явный trace_id.
+# Past traces scanned for the requested events before answering "not in recent history".
 MAX_TRACE_SCAN = 15
 
-
-# ---------------------------------------------------------------------------
-# Tool
-# ---------------------------------------------------------------------------
 
 class ReadLogsTool(Tool):
     """Read the last N events of a session's JSONL audit log."""
@@ -94,16 +54,11 @@ class ReadLogsTool(Tool):
             )
         self.workspace_root = workspace_root.resolve()
         self.log_dir = self.workspace_root / "logs"
-        # The session log this agent is appending to right now. Excluded from the
-        # no-trace_id default, because a run cannot read its own outcome.
+        # The log this session writes; the default skips it, as a run cannot read its own outcome.
         self.live_trace_id = live_trace_id
 
     def risk_for(self, arguments: dict[str, Any]) -> Risk:
         return "read_only"
-
-    # ------------------------------------------------------------------
-    # run
-    # ------------------------------------------------------------------
 
     def run(
         self,
@@ -134,16 +89,8 @@ class ReadLogsTool(Tool):
                 cleaned.append(name)
             filter_set = set(cleaned)
 
-        # Свежесть — не то же самое, что уместность. Живой случай 2026-08-15:
-        # автономный прогон спросил `event_filter=['error']`, получил самую
-        # свежую прошлую трассу — пять служебных строк сессии, где оператор
-        # кликал по очереди одобрений, — и встал: «нужные для диагностики
-        # события недоступны». Ошибки при этом лежали в соседних трассах.
-        # Поэтому при фильтре и без явного адреса выбирается новейшая трасса,
-        # СОДЕРЖАЩАЯ запрошенное; `traces_searched` отличает «нет в этой» от
-        # «нет в недавней истории вообще». Явный trace_id — адрес, и ответ
-        # обязан быть про него, пустой или нет.
-        # Зачем: docs/CODE_NOTES.md, «Recency is not relevance».
+        # A filter without trace_id picks the newest past trace CONTAINING the events; an explicit
+        # trace_id is answered as is. Why: docs/CODE_NOTES.md, "Recency is not relevance".
         traces_searched = 1
         if trace_id is None and filter_set is not None:
             target_path, events_all, traces_searched = self._newest_trace_with(filter_set)
@@ -192,21 +139,14 @@ class ReadLogsTool(Tool):
             "total_events": total,
             "filtered": filter_set is not None,
             "events": events_safe,
-            # Which run this diagnosis is about. Reading the caller's own
-            # unfinished trace answers a different question than it looks like.
+            # The caller's own unfinished trace answers a different question than it seems.
             "is_live_session": is_live,
             "skipped_live": skipped_live,
-            # >1 при пустых events означает: запрошенных событий нет во всей
-            # просмотренной истории, а не только в возвращённой трассе.
+            # >1 with no events: absent from all scanned history, not only from this trace.
             "traces_searched": traces_searched,
-            # The one id the caller cannot look up anywhere else. Measured
-            # 2026-09-05: asked for "the command you ran last turn", the
-            # agent read the newest OTHER file — its own subagent's trace —
-            # and reported it as its session. A default that hides the live
-            # log must at least say which log it hid.
+            # A default that hides the live log must say which log it hid.
             "live_trace_id": self.live_trace_id or "",
-            # How many payload fields were cut to MAX_FIELD_CHARS. Non-zero
-            # says: the whole value is in the file, not in this result.
+            # Non-zero: some whole values are only in the file, not in this result.
             "fields_truncated": fields_truncated,
             "compensation_plan": _NOOP_PLAN,
         }
@@ -217,10 +157,6 @@ class ReadLogsTool(Tool):
                 "to read this session's earlier turns."
             )
         return result
-
-    # ------------------------------------------------------------------
-    # validate_output
-    # ------------------------------------------------------------------
 
     def validate_output(self, output: Any) -> tuple[bool, list[str]]:
         if not isinstance(output, dict):
@@ -250,18 +186,10 @@ class ReadLogsTool(Tool):
             return False, ["compensation_plan must be a dict"]
         return True, []
 
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
-
     def _resolve_log_path(self, trace_id: str | None) -> Path | None:
-        # Validate trace_id BEFORE checking the logs dir so a malformed
-        # trace_id raises in a deterministic way regardless of whether
-        # the workspace happens to have any logs yet.
+        # Validate before the logs-dir check, so a bad trace_id raises even with no logs yet.
         if trace_id is not None:
             require_ascii_identifier(trace_id, role="read_logs trace_id")
-            # Reject obvious traversal shapes here (we don't yet know
-            # the log_dir might exist downstream).
             if "/" in trace_id or "\\" in trace_id or ".." in trace_id:
                 raise PermissionError(
                     f"trace_id {trace_id!r} contains path separators or "
@@ -275,11 +203,7 @@ class ReadLogsTool(Tool):
         if not self.log_dir.is_dir():
             return None
         if trace_id is not None:
-            # Голый идентификатор — законный адрес: живой отказ 2026-08-28
-            # (раунд 7 допроса) — агент передал hex собственной трассы и
-            # получил «файла нет, 0 событий». TraceLogger пишет стемы
-            # `trace_<hex>`/`run_<hex>`; точное имя остаётся первым, префиксы
-            # — запасным ходом, проверки содержания — те же для каждого.
+            # A bare hex id is a valid address: exact stem first, then the trace_/run_ prefixes.
             stems = [trace_id]
             if not trace_id.startswith(("trace_", "run_")):
                 stems += [f"trace_{trace_id}", f"run_{trace_id}"]
@@ -298,10 +222,7 @@ class ReadLogsTool(Tool):
                     return resolved
             return None
 
-        # No trace_id given — the most recent session log that can hold an
-        # answer. `logs/` also holds checkpoints and other stores; those are
-        # never event logs. The live session's own trace is the last resort:
-        # while it is being written it cannot contain this run's outcome.
+        # No trace_id: the newest session log, with the live trace only as a last resort.
         candidates = [
             p for p in self.log_dir.iterdir()
             if p.suffix == ".jsonl" and p.is_file()
@@ -319,7 +240,7 @@ class ReadLogsTool(Tool):
     def _newest_trace_with(
         self, filter_set: set[str]
     ) -> tuple[Path | None, list[dict[str, Any]], int]:
-        """Новейшая ПРОШЛАЯ трасса, где запрошенные события есть."""
+        """The newest PAST trace that contains the requested events."""
         candidates = [
             p for p in (self.log_dir.iterdir() if self.log_dir.is_dir() else [])
             if p.suffix == ".jsonl" and p.is_file()
@@ -353,9 +274,7 @@ class ReadLogsTool(Tool):
                 try:
                     obj = json.loads(line)
                 except json.JSONDecodeError:
-                    # Skip malformed lines silently rather than abort —
-                    # the agent should see what's parseable, even if
-                    # someone hand-edited the file.
+                    # Skip malformed lines: show what is parseable, even in a hand-edited file.
                     continue
                 if isinstance(obj, dict):
                     out.append(obj)
@@ -371,12 +290,7 @@ _NOOP_PLAN = {
 
 
 def _bound_events(events: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
-    """Cut every payload field longer than MAX_FIELD_CHARS to a marked preview.
-
-    Returns the bounded events and the number of fields cut. A cut field
-    becomes `{"_truncated": True, "chars": N, "preview": "<json…>"}` so a
-    reader can tell a short value from a shortened one.
-    """
+    """Cut payload fields over MAX_FIELD_CHARS to a marked preview; return (events, fields cut)."""
     bounded: list[dict[str, Any]] = []
     cut = 0
     for event in events:

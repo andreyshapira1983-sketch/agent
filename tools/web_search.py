@@ -1,19 +1,4 @@
-"""Web Search tool — read-only, no API key (DuckDuckGo via ddgs).
-
-Schema (matches the architecture's Tool Catalog contract):
-  Input:
-    - query: str
-    - max_results: int  (1..MAX_RESULTS_CAP)
-  Output (list[dict]):
-    - title: str
-    - url:   str
-    - snippet: str
-    - source: str   (search provider that produced the row)
-
-Tool Result Validation (§5):
-  - hard fail: output is not a list, or every item is malformed
-  - warnings: empty result set, missing snippets, count > cap
-"""
+"""Web Search tool — read-only, no API key (DuckDuckGo via ddgs)."""
 from __future__ import annotations
 
 from typing import Any
@@ -36,7 +21,7 @@ class WebSearchTool(Tool):
     def __init__(self, default_max_results: int = DEFAULT_MAX_RESULTS,
                  budget_ledger: Any | None = None):
         self.default_max_results = default_max_results
-        #: Persistent `web_fetches` meter (block 7, W3); None = unmetered.
+        #: Persistent `web_fetches` meter; None = unmetered.
         self.budget_ledger = budget_ledger
 
     def run(self, query: str, max_results: int | None = None) -> list[dict[str, str]]:

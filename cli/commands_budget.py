@@ -1,12 +1,4 @@
-"""Budget / autonomy-readiness REPL commands and their pure helpers.
-
-Split out of ``main.py``. These functions form a self-contained group: they
-only call each other, ``cli.parsers._split_meta_args``, and ``core`` classes
-— never back into ``main``. The two hybrid handlers that also need the
-operator digest (``_handle_operator_budget`` /
-``_handle_autonomy_readiness``) stay in ``main.py`` to avoid an import
-cycle.
-"""
+"""Budget / autonomy-readiness REPL commands and their pure helpers."""
 from __future__ import annotations
 
 import json
@@ -403,12 +395,7 @@ def _handle_budget_window_status(rest: str, agent: AgentLoop) -> bool:
 
 
 def _handle_budget_kill_switch(rest: str, agent: AgentLoop, workspace: Path) -> bool:
-    """Operator view / reset for the persistent budget kill-switch (TD-022).
-
-    Read-only by default: reports whether the autonomous day budget kill-switch
-    is engaged and why. ``--clear`` resets a latched switch (operator action);
-    it does not change any budget limit, routing, or provider configuration.
-    """
+    """Show the budget kill-switch state; ``--clear`` resets a latched switch, never limits."""
     from core.budget_kill_switch import BudgetKillSwitch, default_path
 
     tokens = _split_meta_args(rest)

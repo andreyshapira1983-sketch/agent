@@ -1,7 +1,4 @@
-"""Суточный снимок состояния: семь поколений, одно на сутки.
-
-Замер, отвергнутые варианты и границы: H-51 в docs/audit/HISTORICAL_FAILURE_LEDGER.md.
-"""
+"""Daily snapshot of the data/*.jsonl stores: one generation per day, seven kept."""
 from __future__ import annotations
 
 import argparse
@@ -9,12 +6,9 @@ import pathlib
 import shutil
 from datetime import datetime, timezone
 
-#: Сколько поколений держим. Решение оператора 2026-08-25.
 KEEP_GENERATIONS = 7
 
-#: Куда кладём. Внутри `data/`, потому что каталог уже исключён из git и уже
-#: несёт состояние; отдельное место означало бы ещё один путь, который надо
-#: помнить при восстановлении.
+# Inside data/: already ignored by git and already holds state, so no extra path to remember.
 SNAPSHOT_DIRNAME = "snapshots"
 
 
@@ -24,7 +18,7 @@ def _today_stamp(now: datetime | None = None) -> str:
 
 
 def _stores(data: pathlib.Path) -> list[pathlib.Path]:
-    """Живые хранилища: без копий, без снимков, без замков."""
+    """Live stores only: no backups, no snapshots, no locks."""
     return sorted(
         p for p in data.glob("*.jsonl")
         if not p.name.endswith(".bak") and not p.name.endswith(".lock")
@@ -34,11 +28,10 @@ def _stores(data: pathlib.Path) -> list[pathlib.Path]:
 def take_snapshot(
     workspace: pathlib.Path, *, now: datetime | None = None, keep: int = KEEP_GENERATIONS,
 ) -> tuple[pathlib.Path | None, int, int]:
-    """Снять снимок, если сегодняшнего ещё нет. Вернуть (путь, файлов, удалено).
+    """Take today's snapshot unless it exists; return (path, files copied, generations pruned).
 
-    `путь is None` означает «сегодняшний снимок уже есть» — это не ошибка, а
-    идемпотентность: тик зовёт эту функцию каждый раз, а работа делается раз в
-    сутки.
+    A None path means nothing was taken (already taken today, or no data folder or stores):
+    the tick calls this every time and the work happens once a day.
     """
     data = pathlib.Path(workspace) / "data"
     if not data.is_dir():
@@ -60,11 +53,10 @@ def take_snapshot(
         try:
             shutil.copy2(store, target / store.name)
             copied += 1
-        except OSError:  # pragma: no cover — занятый файл не должен ронять снимок
+        except OSError:  # pragma: no cover — a busy file must not abort the snapshot
             continue
 
-    # Прополка: держим `keep` самых новых поколений. Удаляются ТОЛЬКО
-    # собственные снимки, живое состояние не трогается никогда.
+    # Keep the newest `keep` generations; only snapshot folders are removed, never live state.
     generations = sorted(
         (d for d in root.iterdir() if d.is_dir()), key=lambda d: d.name, reverse=True
     )

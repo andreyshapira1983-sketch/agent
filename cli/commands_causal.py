@@ -1,4 +1,4 @@
-"""`:causal` — водитель причинной лестницы."""
+"""`:causal` — the operator's driver of the causal ladder."""
 from __future__ import annotations
 
 import pathlib
@@ -10,7 +10,7 @@ from core.causal_lesson import CausalClaim, blocking_reason, state_of
 
 
 def _handle_causal(rest: str, agent: Any) -> bool:
-    """`:causal [гипотеза | гипотеза]` — где стоим и что даст выдвинутое."""
+    """`:causal [hypothesis | hypothesis]` — the ladder state and what the proposals would give."""
     if rest.split(maxsplit=1)[:1] == ["provenance"]:
         return _handle_provenance(rest.split(maxsplit=1)[1:] or [""], agent)
 
@@ -51,8 +51,7 @@ def _handle_causal(rest: str, agent: Any) -> bool:
 
     print(f"наблюдений: {len(records)}", file=sys.stderr)
     for rec in sorted(records, key=lambda r: -r.occurrences):
-        # Состояние считается судьёй, а не хранилищем: запись — это ступень
-        # OBSERVED, и всё, что выше, надо ещё заработать.
+        # The judge computes the state: a stored record is only OBSERVED, higher rungs are earned.
         claim = CausalClaim(observation=_as_observation(rec))
         print(
             f"  {rec.fingerprint}  x{rec.occurrences}  {state_of(claim)}\n"
@@ -66,7 +65,7 @@ def _handle_causal(rest: str, agent: Any) -> bool:
 
 
 def _handle_provenance(args: list[str], agent: Any) -> bool:
-    """`:causal provenance [ключ]` — цепь квитанций урока; замер, не рассказ."""
+    """`:causal provenance [key]` — measure a lesson's chain of receipts."""
     from core.causal_claim_store import load_claims
     from core.lesson_provenance import trace_lesson_provenance
 
@@ -90,8 +89,7 @@ def _handle_provenance(args: list[str], agent: Any) -> bool:
 
 
 def _handle_ab_experiment(args: list[str], agent: Any) -> bool:
-    """`:causal ab <ключ> [k]` — различающий эксперимент: урок OFF против ON
-    на настоящем кандидате из бэклога; вердикт подписывается измерением."""
+    """`:causal ab <key> [k]` — measure a lesson OFF vs ON on a real backlog candidate."""
     from core.backlog_selector import load_backlog
     from core.lesson_ab_experiment import run_lesson_ab_experiment
 

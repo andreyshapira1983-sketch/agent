@@ -1,24 +1,4 @@
-"""MVP-13.1 — `diff_file` tool: unified diff vs proposed content.
-
-The self-repair loop needs to show a user (and let the planner reason
-about) exactly which lines a proposed code change would touch BEFORE
-the change is applied. `diff_file` computes that diff against the
-current on-disk content without writing anything itself.
-
-This tool is the "show me what's about to change" surface for the
-approval prompt — UX cribbed from `git diff` / `patch`.
-
-Safety:
-  - Paths must be ASCII and resolve INSIDE the workspace.
-  - Credential paths (`.env`, keys, `secrets/`) are refused, as in file_read.
-  - File content is read with a hard byte cap; oversize files are
-    refused outright (the planner can fetch a narrower slice via
-    file_read if needed).
-  - `proposed_content` is size-capped the same way.
-  - Read-only: nothing on disk changes.
-
-Risk: read_only.
-"""
+"""``diff_file`` tool: read-only unified diff of a workspace file against proposed content."""
 from __future__ import annotations
 
 import difflib
@@ -37,10 +17,6 @@ DEFAULT_CONTEXT_LINES = 3
 MAX_CONTEXT_LINES = 20
 MAX_DIFF_CHARS = 64 * 1024            # cap the unified-diff output
 
-
-# ---------------------------------------------------------------------------
-# Tool
-# ---------------------------------------------------------------------------
 
 class DiffFileTool(Tool):
     """Show a unified diff between a file and a proposed replacement."""
@@ -72,10 +48,6 @@ class DiffFileTool(Tool):
 
     def risk_for(self, arguments: dict[str, Any]) -> Risk:
         return "read_only"
-
-    # ------------------------------------------------------------------
-    # run
-    # ------------------------------------------------------------------
 
     def run(
         self,
@@ -119,7 +91,6 @@ class DiffFileTool(Tool):
                 "a credential store, and the agent's own tools do not fetch keys"
             )
 
-        # Read current content if the file exists.
         file_exists = target.is_file()
         current_text = ""
         current_bytes = 0
@@ -146,8 +117,7 @@ class DiffFileTool(Tool):
             diff = diff[:MAX_DIFF_CHARS] + "\n... <diff truncated>\n"
             diff_truncated = True
 
-        # Defence-in-depth: secrets in the file/proposed get redacted
-        # before the diff leaves the tool boundary.
+        # Defence in depth: redact secrets before the diff leaves the tool.
         from core.redaction import redact_text
 
         diff_safe, _ = redact_text(diff)
@@ -163,10 +133,6 @@ class DiffFileTool(Tool):
             "diff_truncated": diff_truncated,
             "compensation_plan": _NOOP_PLAN,
         }
-
-    # ------------------------------------------------------------------
-    # validate_output
-    # ------------------------------------------------------------------
 
     def validate_output(self, output: Any) -> tuple[bool, list[str]]:
         if not isinstance(output, dict):

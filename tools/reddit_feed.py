@@ -1,13 +1,4 @@
-"""Reddit читается через свою ленту `.rss`, а не через страницу.
-
-24.09, чат оператора: «посмотри в Reddit» — web_fetch страницы r/LocalLLaMA
-отдал заглушку «Reddit» в 6 символов: страница собирается скриптом в
-браузере. JSON (`.json`) с сервера отвечает 403. Лента `.rss` отвечает 200 и
-несёт посты целиком (замер 24.09: 74 КБ Atom). У каждого публичного адреса
-Reddit есть лента: к пути дописывается `.rss`; работает с запуска сайта и
-пережила смену правил API в 2023 (wprssaggregator.com/reddit-rss-feed,
-howtogeek.com/320264). Разбор — тот же безопасный разборщик, что у rss_fetch.
-"""
+"""Read Reddit through its `.rss` feed: pages are script-built and `.json` is refused (403)."""
 from __future__ import annotations
 
 from urllib.parse import urlsplit
@@ -17,7 +8,7 @@ _HOSTS = frozenset({"reddit.com", "www.reddit.com", "old.reddit.com", "new.reddi
 
 
 def reddit_feed_url(url: str) -> str | None:
-    """Адрес ленты для страницы Reddit; None — не Reddit или уже лента/JSON."""
+    """Feed URL for a Reddit page; None if not Reddit or already a feed/JSON URL."""
     parts = urlsplit(url)
     if (parts.hostname or "").lower() not in _HOSTS:
         return None
@@ -29,7 +20,7 @@ def reddit_feed_url(url: str) -> str | None:
 
 
 def feed_as_text(xml_text: str, *, limit: int = 25) -> str:
-    """Лента -> читаемый текст: заголовок, адрес и содержание каждой записи."""
+    """Feed to readable text: title, URL and content of each entry (rss_fetch's safe parser)."""
     from tools.rss_fetch import _parse_feed
     from tools.web_fetch import WebFetchTool
 

@@ -45,7 +45,7 @@
         "tag": "PROPAGATED_SYSTEMEXIT",
         "payload": "the SystemExit instance constructed BELOW main, carrying its own code; main has no return value in this variant",
         "payload_states_observed": [0, 2],
-        "reachability": "PROVEN by two independent routes — argparse (--help -> 0; unknown flag / missing argument / invalid choice -> 2) and the `:quit`/`:exit` dispatcher (core route: cli/command_dispatch.py:479 raises SystemExit(0))"
+        "reachability": "PROVEN by two independent routes — argparse (--help -> 0; unknown flag / missing argument / invalid choice -> 2) and the `:quit`/`:exit` dispatcher (core route: cli/command_dispatch.py:459 raises SystemExit(0))"
       },
       {
         "tag": "PROPAGATED_OTHER_EXCEPTION",

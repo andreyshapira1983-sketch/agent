@@ -1,9 +1,4 @@
-"""Дискриминация детерминированного верификатора на парных утверждениях.
-
-Пара строится так, что валидный и невалидный ответ отличаются РОВНО одним
-элементом; валидный — дословный пересказ источника с правильной цитатой.
-LLM-проход выключен, поэтому замер бесплатный и воспроизводимый.
-"""
+"""Measure how the deterministic verifier separates claim pairs that differ in one element."""
 import collections
 import sys
 
@@ -48,44 +43,43 @@ for i in range(N):
     url_t, sent_t = TEMPLATES[i % len(TEMPLATES)]
     url = url_t.format(i=i)
     v = 10 + i
-    wrong = v * 10                      # заведомо другое число
+    wrong = v * 10                      # surely a different number
     excerpt = sent_t.format(v=v)
     ch = _chain(url, excerpt)
 
     true_claim = f"{excerpt} [web:{url}]"
 
-    # A. Следует ли утверждение из источника (число подменено).
+    # A. The number is swapped.
     run("A. число соответствует источнику", "valid", true_claim, ch)
     run("A. число соответствует источнику", "invalid",
         f"{sent_t.format(v=wrong)} [web:{url}]", ch)
 
-    # B. Существует ли цитируемый источник.
+    # B. The cited source does not exist.
     run("B. цитируемый источник существует", "valid", true_claim, ch)
     run("B. цитируемый источник существует", "invalid",
         f"{excerpt} [web:https://example.org/ghost/{i}]", ch)
 
-    # C. Относится ли утверждение к тому, что в цепочке вообще есть.
+    # C. The claim is off the chain's topic.
     run("C. утверждение по теме цепочки", "valid", true_claim, ch)
     run("C. утверждение по теме цепочки", "invalid",
         f"{OFF_TOPIC.format(v=v)} [web:{url}]", ch)
 
-    # D. Есть ли цитата вообще.
+    # D. No citation at all.
     run("D. цитата присутствует", "valid", true_claim, ch)
     run("D. цитата присутствует", "invalid", excerpt, ch)
 
-    # E. Отрицание: источник утверждает, ответ отрицает.
+    # E. The source asserts, the answer negates.
     run("E. полярность совпадает с источником", "valid", true_claim, ch)
     run("E. полярность совпадает с источником", "invalid",
         f"{excerpt.rstrip('.')} — неверно, это не так. [web:{url}]", ch)
 
-# ── F, G: формы, которые судит ВЫЧИСЛЯЮЩИЙ гейт (MIR-143) ─────────────────
+# ── F, G: forms judged by the computing gate ──────────────────────────────
 RUN_EXCERPT = "tests_total=120\ntests_failed=3\nversion=2.11.0\ncoverage=0.82"
 for i in range(N):
     ch = _chain(f"https://example.org/run/{i}", RUN_EXCERPT)
     run("F. производное число (120-3)", "valid",
         f"117 tests passed [web:https://example.org/run/{i}]", ch)
-    # 117 — верный ответ (120-3), поэтому именно его в «невалидные» брать
-    # нельзя: иначе замер обвинил бы гейт в собственной ошибке генератора.
+    # 117 (120-3) is the right answer, so it must never serve as an invalid twin.
     wrong = 100 + i + (1 if 100 + i == 117 else 0)
     run("F. производное число (120-3)", "invalid",
         f"{wrong} tests passed [web:https://example.org/run/{i}]", ch)
@@ -94,15 +88,8 @@ for i in range(N):
     run("G. сравнение версии с границей", "invalid",
         f"The report records a version above 3.0 [web:https://example.org/run/{i}]", ch)
 
-# ── H: не по теме, но ОДНО случайное общее слово (MIR-146, граница) ────────
-#
-# Седьмой гейт демотирует только при НУЛЕ общих содержательных слов. Класс H
-# мерит то, что этой границей не покрыто: утверждение о другом предмете, куда
-# одно слово улики попало по совпадению — так, как оно попадает в живом тексте
-# («обработки», «квартал», «проект» встречаются в любых темах).
-#
-# Валидный близнец — настоящий пересказ той же улики; невалидный отличается
-# ТЕМОЙ, а не числом и не полярностью, и делит ровно одно слово.
+# ── H: off topic, yet sharing exactly one content word with the evidence ──
+# The seventh gate demotes only at zero shared content words; H measures what that misses.
 H_PAIRS = [
     ("Средняя задержка обработки запроса составила 20 миллисекунд.",
      "Средняя задержка обработки запроса — 20 миллисекунд.",

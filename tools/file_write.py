@@ -1,21 +1,4 @@
-"""File Write tool — sandboxed, secret-aware, backup-on-overwrite.
-
-Risk model (§5 Action Risk & Reversibility): - Creating a NEW file inside
-the workspace -> reversible The caller can simply delete it; no prior
-content was lost. - OVERWRITING an existing file -> irreversible Even though
-we keep a timestamped `.bak.<ts>` copy, the operation crosses a trust
-boundary and must require human approval before the loop dispatches it. The
-backup is a recovery aid, not a reclassifier. - Path escapes the workspace
--> static risk falls back to `irreversible` (conservative) and `run()`
-raises PermissionError before touching the filesystem.
-
-Hard rules enforced inside `run()` (defence in depth — even if the policy
-gate is misconfigured, these still hold): - path must be a non-empty string
-- content must be a string - encoded content must be <= MAX_BYTES - content
-must NOT contain any high-confidence credential pattern (delegated to
-`core.secret_scanner.contains_secret`) - resolved path must stay within
-`workspace_root`
-"""
+"""file_write tool: write a UTF-8 file inside the workspace; overwrites keep a backup."""
 from __future__ import annotations
 
 import calendar
@@ -35,7 +18,7 @@ MAX_BYTES = 1 * 1024 * 1024  # 1 MiB
 
 
 def _reserve_backup(target: Path) -> Path:
-    """Claim a fresh `<file>.bak.<UTC stamp>` name; a taken name (two writes in one second) moves the stamp on, so an older backup is never overwritten."""
+    """Claim a fresh `<file>.bak.<UTC stamp>` name; a taken stamp moves on, never overwriting."""
     seconds = calendar.timegm(time.gmtime())
     for step in range(3600):
         stamp = datetime.fromtimestamp(seconds + step, timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -59,8 +42,7 @@ class FileWriteTool(Tool):
         "to write paths outside the workspace or content that contains "
         "credentials."
     )
-    # Conservative static fallback. The real per-call risk is computed
-    # by `risk_for()` and is what PolicyGate reads.
+    # Static fallback; PolicyGate reads the per-call risk from risk_for().
     risk: Risk = "irreversible"
 
     def __init__(self, workspace_root: Path, max_bytes: int = MAX_BYTES):
@@ -71,9 +53,7 @@ class FileWriteTool(Tool):
     # path resolution + sandbox
     # ------------------------------------------------------------------
     def _resolve(self, raw_path: str) -> Path:
-        # ASCII-only identifier policy: file paths in this codebase are
-        # programming identifiers, not human content. Cyrillic / other
-        # non-ASCII is allowed inside `content`, never in `path`.
+        # Paths are ASCII identifiers; non-ASCII text is allowed only in content.
         require_ascii_identifier(raw_path, role="file_write path")
         candidate = (self.workspace_root / raw_path).resolve()
         try:
@@ -82,15 +62,13 @@ class FileWriteTool(Tool):
             raise PermissionError(
                 f"Path escapes workspace: {candidate}"
             ) from exc
-        # git запускает программы, названные в его папке (хуки, фильтры, config).
+        # git runs programs named inside .git (hooks, filters, config).
         if touches_git(self.workspace_root, candidate):
             raise PermissionError(
                 f"refusing to write under .git: {raw_path!r} — the repository's "
                 "own folder is not the agent's to edit"
             )
-        # Тормоза — только оператору, и одобрение этого не снимает
-        # (core/control_files.py). Отказ здесь делает и risk_for
-        # «irreversible», и run() — PermissionError до любой записи.
+        # Brake files are the operator's only, even with approval (core/control_files.py).
         guarded = control_file_hit(self.workspace_root, candidate)
         if guarded:
             raise PermissionError(refuse_message(guarded))
@@ -106,28 +84,17 @@ class FileWriteTool(Tool):
         try:
             target = self._resolve(raw_path)
         except PermissionError:
-            # Sandbox violation: policy will see `irreversible`, but the
-            # actual `run()` will raise before any I/O happens — defence
-            # in depth.
+            # Sandbox violation: run() raises before any I/O anyway.
             return "irreversible"
         if target.exists():
-            # Свои предложения агент правит сам — решение оператора
-            # 2026-09-21: перезапись требовала одобрения, правки шли новыми
-            # файлами, и proposals/ выросла до 17 версий одного документа.
-            # Откат есть всегда: перед записью делается резервная копия.
+            # The agent edits its own proposals and notes without approval; a backup is kept.
             if self._is_own_proposal(target):
                 return "reversible"
             return "irreversible"
         return "reversible"
 
     def _is_own_proposal(self, target: Path) -> bool:
-        """Свои предложения и свои заметки: proposals/ и data/notes/.
-
-        Заметки — то же решение 2026-09-21: ночь 24→25.09 агент записал заметку
-        data/notes/…_maintenance_need.md, захотел её дополнить — перезапись
-        потребовала человека, которого в кампании нет, и дополнение легло в
-        новый журнал без читателя. Копия перед записью делается и здесь.
-        """
+        """True for the agent's own files under proposals/ or data/notes/."""
         resolved = target.resolve().parents
         return any((self.workspace_root / own).resolve() in resolved
                    for own in ("proposals", "data/notes"))
@@ -148,8 +115,7 @@ class FileWriteTool(Tool):
             looks_like_unfilled_path,
         )
 
-        # base_dir несёт факт существования: перезапись реального файла — не
-        # шаблон, что бы ни значилось в имени (контракт агента, груз №2).
+        # base_dir lets an existing file pass: overwriting a real file is never a template.
         if looks_like_unfilled_path(path, base_dir=str(self.workspace_root)):
             raise ValueError(
                 f"refusing to write to an unfilled placeholder path: {path!r} — "
@@ -168,18 +134,11 @@ class FileWriteTool(Tool):
                 f"content too large: {size} bytes > limit {self.max_bytes}"
             )
 
-        # include_keywords=False: содержимое рождается ВНУТРИ доверенной
-        # границы — это работа самого агента, а не внешние данные. Мягкий слой
-        # ключевых слов здесь ловил упоминание вместо предмета и не давал
-        # записать ни план про доступы, ни код, читающий ключ из окружения
-        # (замер 2026-08-29: 3 ложных блока из 7 случаев). Жёсткие шаблоны
-        # (настоящие ключи с телом) продолжают действовать в полную силу.
+        # include_keywords=False: keyword hits only flagged mentions of keys in the agent's
+        # own text; real key patterns are still refused.
         is_secret, reasons = contains_secret(content, include_keywords=False)
         if is_secret:
-            # Note: error message is itself kernel-redacted on the loop
-            # side (TraceLogger + AgentLoop.run both apply redaction),
-            # so leaking the matched literal here is safe — but we only
-            # surface the *kind* of finding anyway.
+            # Only the kind of finding is reported, never the matched text.
             raise PermissionError(
                 "refusing to write credentials to disk: " + ", ".join(reasons)
             )
@@ -192,8 +151,7 @@ class FileWriteTool(Tool):
         if target_existed_before and target.stat().st_nlink > 1:
             raise PermissionError(f"refusing to overwrite {path!r}: it is hard-linked, the same bytes live elsewhere too")
         if target_existed_before:
-            # Backup first so the previous content is recoverable even if
-            # the write that follows is interrupted (power loss, etc.).
+            # Back up first, so an interrupted write cannot lose the old content.
             backup = _reserve_backup(target)
             try:
                 shutil.copy2(target, backup)
@@ -206,17 +164,12 @@ class FileWriteTool(Tool):
             target.parent.mkdir(parents=True, exist_ok=True)
             mode = "create"
 
-        # newline="": текст пишется как есть. Без этого на Windows каждый \n
-        # становился \r\n, и доклад «17713 байт» расходился с 18105 на диске
-        # (2026-09-21). Размер — измеренный на диске, а не посчитанный.
+        # newline="": write as is (Windows would turn \n into \r\n); size is measured on disk.
         target.write_text(content, encoding="utf-8", newline="")
         size = target.stat().st_size
 
         target_rel = str(target.relative_to(self.workspace_root))
-        # MVP-11 Compensation: tool ships an undo plan in its output.
-        # The AgentLoop captures it after a successful tool_call so
-        # `:rollback` can either delete the newly-created file (create
-        # mode) or restore the backup we just wrote (overwrite mode).
+        # Undo plan for :rollback: delete a created file or restore an overwrite's backup.
         if target_existed_before:
             plan = CompensationPlan(
                 tool_name=self.name,
@@ -276,8 +229,7 @@ class FileWriteTool(Tool):
         if output.get("mode") == "create" and output.get("backup_path"):
             issues.append("create must not have a backup_path")
 
-        # MVP-11 contract: every successful write ships a compensation
-        # plan (delete on create, restore_from_backup on overwrite).
+        # Every successful write ships exactly one matching compensation action.
         plan = output.get("compensation_plan")
         if not isinstance(plan, dict):
             issues.append("missing or non-dict compensation_plan")

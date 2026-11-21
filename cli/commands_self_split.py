@@ -1,11 +1,4 @@
-"""``:self-split <path>`` REPL command (junior-plan item #5).
-
-Plans ONE deterministic incremental extraction step for an oversized Python
-module (:mod:`core.incremental_splitter`) and publishes it as a normal
-``self_apply_lane.run`` approval item. It never applies anything itself: the
-human approves the item and runs it via ``:self-apply-run``, which executes
-targeted + full tests and auto-rolls back on red.
-"""
+"""``:self-split <path>``: queue one safe module-split step as an approval item."""
 from __future__ import annotations
 
 import sys

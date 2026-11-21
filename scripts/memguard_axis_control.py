@@ -1,11 +1,4 @@
-"""Контроль к зонду MemGuard: почему подтверждённая запись проигрывает.
-
-Печатает разбор одной очной ставки — очки, метки, сигнал — и повторяет тот же
-подбор БЕЗ прибавки за метку. Если без прибавки побеждает сама запись, значит
-проигрыш даёт именно метка, а не слабое совпадение слов.
-
-Запуск: PYTHONIOENCODING=utf-8 PYTHONPATH=. python scripts/memguard_axis_control.py
-"""
+"""MemGuard probe control: rank one verified record with and without the +50 tag boost."""
 from __future__ import annotations
 
 from pathlib import Path

@@ -1,12 +1,9 @@
-"""Generate the issue tally from the registry's own sections.
+"""Derive the status tally of MASTER_ISSUE_REGISTRY.md from each issue's own Status line.
 
-So the count is derived, never typed. Each issue's own `**Status:**` line is
-the input; the header table is output.
+--check fails when the tally table is out of sync; --write rewrites the table. The
+external checklist (### MIR-external-checklist) is not an issue and is not counted.
 
-`### MIR-external-checklist` is deliberately excluded from the issue count:
-it is a checklist of externally-observed failure modes, explicitly not
-confirmed repo defects, and counting it as an issue is what made the totals
-ambiguous. It is reported separately.
+Usage: python scripts/registry_tally.py [--check | --write]
 """
 from __future__ import annotations
 
@@ -22,9 +19,7 @@ _HEADING = re.compile(r"^### MIR-(\S+)", re.MULTILINE)
 _STATUS = re.compile(r"\*\*Status:\*\*\s*\**`([a-z_]+)`")
 _TABLE = re.compile(
     r"(?P<start>### Status tally\n\n)"
-    # No re.S, and [^\n]* rather than .* — with DOTALL this pattern swallowed
-    # the entire rest of the document (765 lines), and --write would have
-    # destroyed the registry it exists to protect.
+    # No re.S and [^\n]*, not .*: with DOTALL the match swallows the rest of the document.
     r"(?P<table>(?:\|[^\n]*\n)+)"
 )
 

@@ -1,9 +1,4 @@
-"""Model routing / registry / catalog / usage REPL commands.
-
-Split out of ``main.py``. Each command works through ``agent.model_router`` and
-``core`` helpers only — never back into ``main`` — so there is no import cycle.
-``main.py`` re-exports every name below for the REPL dispatch.
-"""
+"""Model routing, registry, catalog and usage REPL commands."""
 from __future__ import annotations
 
 import json
@@ -87,9 +82,7 @@ def _handle_model_registry_audit(rest: str, agent: AgentLoop) -> bool:
 
 
 def _handle_refresh_models(rest: str, agent: AgentLoop) -> bool:
-    """Query provider APIs, classify models into tiers, write
-    config/model_catalog.json.
-    """
+    """Query provider APIs, classify models into tiers, write config/model_catalog.json."""
     from core.model_catalog import refresh_catalog
     from core.task_complexity import ComplexityTier
 
@@ -105,8 +98,7 @@ def _handle_refresh_models(rest: str, agent: AgentLoop) -> bool:
     try:
         catalog = refresh_catalog(providers=providers)
     except Exception as exc:  # noqa: BLE001
-        # Structured audit trail for the failed write path (no secrets: only
-        # provider names, the exception type, and a truncated message).
+        # No secrets in the journal: provider names, exception type, truncated message.
         agent.log.log(
             "refresh_models_failed",
             {
@@ -119,9 +111,7 @@ def _handle_refresh_models(rest: str, agent: AgentLoop) -> bool:
         print("  Check ANTHROPIC_API_KEY / OPENAI_API_KEY in .env", file=sys.stderr)
         return True
 
-    # Structured audit trail for the successful write path. Payload is safe:
-    # provider names, per-provider model counts, best model per tier and the
-    # catalog timestamp — never any credential or env value.
+    # The payload never carries a credential or env value.
     catalog_providers = catalog.get("providers", {})
     agent.log.log(
         "refresh_models",
@@ -136,8 +126,7 @@ def _handle_refresh_models(rest: str, agent: AgentLoop) -> bool:
                 for provider, pdata in catalog_providers.items()
             },
             "updated_at": catalog.get("updated_at"),
-            # Кого спросить не удалось. Молчание об этом читалось бы как
-            # «спросили всех» (MIR-170).
+            # Providers that could not be asked; silence would read as "all were asked".
             "unreachable": dict(catalog.get("unreachable") or {}),
         },
     )
@@ -163,8 +152,7 @@ def _handle_refresh_models(rest: str, agent: AgentLoop) -> bool:
                 print(f"             (others: {', '.join(others[:4])})", file=sys.stderr)
 
     print("\n── Catalog saved → config/model_catalog.json ───────────────────────", file=sys.stderr)
-    # Не «после перезапуска»: tier_model_for читает каталог на каждом вызове,
-    # и уже ТЕКУЩАЯ сессия маршрутизирует по нему со следующего хода (R7).
+    # No restart needed: tier_model_for reads the catalog on every call.
     print(
         "  The agent picks these models up immediately — the running session "
         "routes by them from its next call.",
@@ -229,7 +217,7 @@ _DISCOVERY_OPTION_FLAGS = frozenset({"--json", "--dry-run", "--write"})
 
 
 def _handle_model_discovery_audit(rest: str, agent: AgentLoop) -> bool:
-    """LOCAL, no-network model discovery readiness audit (TD-011)."""
+    """Local, no-network model discovery readiness audit."""
     from core.model_discovery import build_discovery_audit
 
     tokens = _split_meta_args(rest)
@@ -248,17 +236,7 @@ def _handle_model_discovery_audit(rest: str, agent: AgentLoop) -> bool:
 
 
 def _handle_provider_catalog_refresh(rest: str, agent: AgentLoop) -> bool:
-    """DRY-RUN live model discovery + catalog diff, read-only (TD-011/012).
-
-    With --dry-run this queries the model lists of the providers that have
-    credentials (a metadata-only, non-inference provider call — still a
-    network call) and diffs them against config/model_catalog.json. It NEVER
-    writes the catalog and NEVER switches models. Without --dry-run it does
-    nothing but print usage, so it can never accidentally reach the network.
-    The --write path is intentionally not implemented here (reserved for a
-    future, explicitly approved change); use :refresh-models to persist a
-    catalog.
-    """
+    """Dry-run diff of provider model lists against the catalog; writes and switches nothing."""
     from core.model_discovery import build_discovery_report
 
     tokens = _split_meta_args(rest)

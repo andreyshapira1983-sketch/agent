@@ -1,17 +1,4 @@
-"""Find in Files — поиск по рабочей папке: файлы по имени и строки по тексту.
-
-Зачем существует: замер 2026-09-19, опыт с библиотекой книг (~100 текстовых
-книг, 113 МБ). Искать агенту было нечем, кроме `findstr` через shell_exec, и
-большинство провалов были одного вида: «такой книги в библиотеке нет», хотя
-она была. `findstr /s /c "===== PAGE" knowledge_library` падал на синтаксисе,
-`/s` без маски имени ничего не находил, пустой вывод читался как отсутствие.
-Здесь поиск кросс-платформенный, а отрицательный ответ говорит, СКОЛЬКО файлов
-просмотрено, — «0 совпадений в 97 файлах» и «поиск не состоялся» больше не
-выглядят одинаково.
-
-Только чтение, внутри рабочей папки; файлы ключей не просматриваются никогда
-(тот же запрет, что у file_read).
-"""
+"""Read-only workspace search: files by name, lines by text; credential files are never read."""
 from __future__ import annotations
 
 import fnmatch
@@ -27,17 +14,13 @@ DEFAULT_RESULTS = 50
 MAX_FILE_BYTES = 50_000_000
 _SKIP_DIRS = frozenset({".git", "__pycache__", "node_modules", ".venv", "venv", ".pytest_cache"})
 _LINE_CHARS = 240
-#: Собственные журнал и память агента в корне рабочей папки. Веб-экзамен
-#: 2026-09-19, второй прогон, N01: поиск «release» и «версия» по «.» нашёл
-#: 3 строки в 1 файле — `logs/trace_….jsonl`, журнал ЭТОГО хода, куда только
-#: что записан сам запрос. Документ `docs/RELEASE.md` («Текущий выпуск: 5.7.8»)
-#: этих слов не содержит; агент прочёл эхо своего вопроса и ответил «не
-#: найдено». Ищутся они, только когда `path` указывает внутрь них.
+#: The agent's own journal and memory, searched only when `path` points inside them:
+#: a workspace-wide search would otherwise find the echo of its own query in this turn's log.
 _OWN_RUNTIME_DIRS = frozenset({"logs", "data"})
 
 
 def _hit_text(line: str, matcher: re.Pattern[str]) -> str:
-    """A long line cut AROUND its first match: the head alone hid «green» at char 330 (17.11)."""
+    """Cut a long line around its first match, not at its head."""
     if len(line) <= _LINE_CHARS:
         return line
     m = matcher.search(line)
@@ -75,7 +58,7 @@ class FindInFilesTool(Tool):
                 continue
             if _is_credential_path(rel.as_posix()):
                 continue
-            # Ссылка или junction по дороге: читается то, на что она указывает.
+            # A link or junction on the way: what gets read is its target.
             try:
                 real = path.resolve().relative_to(self.workspace_root)
             except (ValueError, OSError):
@@ -101,9 +84,7 @@ class FindInFilesTool(Tool):
             root.relative_to(self.workspace_root)
         except ValueError as exc:
             raise PermissionError(f"Path escapes workspace: {root}") from exc
-        # Путь к ФАЙЛУ — поиск внутри этого файла. Замер 2026-09-19: агент искал
-        # в Downey_ThinkPython2.txt, получил «Directory not found» и записал в
-        # ответ, что файл прочитать не удалось.
+        # A file path searches inside that file.
         if root.is_file():
             if _is_credential_path(root.relative_to(self.workspace_root).as_posix()):
                 raise PermissionError(f"refusing to search a credential file: {path!r}")
@@ -132,7 +113,7 @@ class FindInFilesTool(Tool):
             try:
                 text = f.read_text(encoding="utf-8")
             except (UnicodeDecodeError, OSError):
-                continue  # не текст — не предмет поиска по строкам
+                continue  # not text, so not searched by line
             searched += 1
             rel = f.relative_to(self.workspace_root).as_posix()
             found_here = False
@@ -147,9 +128,7 @@ class FindInFilesTool(Tool):
             matched_files += found_here
         if not total:
             return f"no matches for {query!r} in {searched} text files {where}"
-        # Строки и вхождения — разные числа: замер 2026-09-19, «entropy» стоит в
-        # 125 строках Tong_StatisticalPhysics.txt, а вхождений 131, и агент
-        # выдал число строк за число вхождений.
+        # Lines and occurrences are different numbers; both are reported.
         head = (f"{total} matching lines ({occurrences} occurrences) in {matched_files} "
                 f"of {searched} text files {where}")
         if total > limit:

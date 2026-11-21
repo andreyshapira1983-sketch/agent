@@ -1,12 +1,12 @@
-"""Запуск исполнителя Agent Market опросом (self-hosted, без webhook).
+"""Run the Agent Market worker by polling (self-hosted, no webhook).
 
-    python scripts/market_worker.py --once                    # один проход
-    python scripts/market_worker.py --interval 45             # цикл опроса
-    python scripts/market_worker.py --once --allow-job <jobId> # взять ЭТУ работу
+    python scripts/market_worker.py --once                     # one pass
+    python scripts/market_worker.py --interval 45              # polling loop
+    python scripts/market_worker.py --once --allow-job <jobId> # take THIS job
 
-Без --allow-job агент ничего не берёт: назначения лишь записываются в
-logs/market_api.jsonl как ждущие разрешения оператора. Токен — только
-переменная AGENT_MARKET_API_TOKEN (из .env рабочей папки).
+Without --allow-job nothing is taken: assignments are only logged to
+logs/market_api.jsonl as waiting for the operator's permission. The token comes
+only from the AGENT_MARKET_API_TOKEN variable (the workspace .env).
 """
 from __future__ import annotations
 
@@ -44,9 +44,7 @@ def main(argv: list[str] | None = None) -> int:
 
     client = MarketClient(log_path=args.workspace / "logs" / "market_api.jsonl")
     agent = build_agent(args.workspace, with_memory=True)
-    # Покупателю — тот же «край показа», что человеку в чате: без служебного
-    # формата «Conclusion:/Facts:» и машинных меток, предупреждения — словами.
-    # Замер 2026-09-25: без этого сдавался внутренний формат ответа агента.
+    # The buyer gets the same human-facing text as a chat user, not the internal answer format.
     from core.usd_spend import usd_since
 
     worker = MarketWorker(client, lambda text: format_human_response(agent.run(user_question=text)),
@@ -62,7 +60,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _ledger(args: argparse.Namespace) -> int:
-    """Учёт прибыли: показать, или отметить вмешательство и минуты людей."""
+    """Show the profit ledger, or mark an order's intervention and human minutes."""
     import json
 
     from core.market_ledger import FILE_NAME, LedgerUnreadable, MarketLedger, summary

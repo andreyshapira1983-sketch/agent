@@ -1,51 +1,4 @@
-"""Перерезанный нерв: кто пишет поле и кто его читает.
-
-Зачем. Перепись `knowledge/maps/cns_census.json` размечает нервную систему на
-уровне узлов и связей, но её периметр — цикл: 101 узел из 2972 функций тела,
-3,4%. Органы (планировщик, память, верификатор, инструменты) она не
-разбирает и честно об этом пишет: «их внутренности разбираются отдельно и
-позже». Между тем ВСЕ дефекты 2026-09-20 нашлись именно в органах, и каждый
-был одной формы: что-то производится и никем не потребляется.
-
-Этот отчёт берёт ту же мысль, но дешевле: не «все узлы и переходы», а только
-две оси, которые считаются разбором кода и ничего не требуют понимать.
-
-ОСЬ 1 — поле ДОПИСАНО в существующую структуру (`d["k"] = …`) и не читается
-нигде. Дописывание — это заявка «пусть кто-то ниже по конвейеру это возьмёт»;
-если не берёт никто, нерв перерезан. Литералы словарей сюда не входят: там
-ключ и потребитель обычно стоят рядом.
-
-ОСЬ 2 — функция определена и ни разу не упомянута: ни вызова, ни ссылки, ни
-даже в тестах. Мёртвый орган.
-
-ЧЕГО ЭТОТ ОТЧЁТ НЕ ВИДИТ, и это важнее его находок:
-
-* читателя ВНЕ процесса. Ключ журнальной записи читает человек; ключ запроса
-  читает чужая служба; переменную окружения читает система. Для разбора кода
-  они неотличимы от мёртвых, поэтому имена не-змеиного вида отброшены, а
-  остальное приходится смотреть глазами;
-* нерв, который несёт НЕ ТО. Поле пишут, поле читают, значит оно живо — а
-  означает уже не то, что думали. Это болезнь «признака-заместителя», и
-  счётом потока она не ловится;
-* доступ через `getattr`, таблицу имён или строку из конфигурации. Сюда же
-  попадает вызов ПО СОГЛАШЕНИЮ ОБ ИМЕНИ: `http_open` у обработчика urllib
-  зовётся библиотекой как `<схема>_open`, и мёртвым он только выглядит.
-
-ЧТО ПОКАЗАЛА ПРОГУЛКА ПО СПИСКУ (2026-09-20, все находки пройдены глазами):
-
-* ось 2 — 8 настоящих из 13; четыре ложных были украшенными проверками
-  pydantic (теперь украшенные пропускаются), одна — вызов по соглашению
-  об имени;
-* ось 1 — 0 настоящих из 18. ВСЕ оказались записями наружу: сводка тика и
-  отчёты гигиены идут человеку, `recent_lessons` — в промпт модели,
-  `evidence`/`low_evidence` — в журнал, `start_new_session` — в Popen.
-  То есть ось 1, как она построена, меряет не перерезанные нервы, а
-  диагностические поля. Оставлена честной описью: список короткий, его
-  видно целиком, и в нём сразу заметен новичок.
-
-Полнота — только относительно этих правил, как и у переписи ЦНС. Запуск:
-`python scripts/unread_fields.py`.
-"""
+"""Report fields added to a structure but never read, and functions never mentioned at all."""
 from __future__ import annotations
 
 import ast
@@ -58,15 +11,11 @@ _ROOT = Path(__file__).resolve().parent.parent
 _DIRS = ("core", "tools", "cli", "app", "api")
 _ENTRY = ("agent_tick.py", "main.py")
 _READ_CALLS = {"get", "pop", "setdefault"}
-#: Наше поле пишется змеиным именем. `fieldsOfStudy`, `X-Api-Key`,
-#: `PYTHONDONTWRITEBYTECODE` — адресованы наружу, и их читатель не здесь.
+#: Our fields are snake_case; camelCase, header and env-var names are read outside the process.
 _OUR_FIELD = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
-#: Каталоги, где ИЩУТСЯ упоминания, но не определения: скрипт-обслуживание
-#: зовёт код так же по-настоящему, как и сам агент. Найдено собственной
-#: слепотой 2026-09-20: `completion_from_outcome` объявлялась мёртвой, а её
-#: зовёт scripts/completion_backfill.py.
+#: Searched for mentions, not definitions: maintenance scripts call code for real too.
 _CALLER_DIRS = ("scripts", "tests")
 
 
@@ -88,7 +37,7 @@ def _trees(paths: list[Path]):
 
 
 def _collect(paths: list[Path]) -> tuple[dict, dict]:
-    """(дописанные ключи -> места, прочитанные имена -> места)."""
+    """(added keys -> sites, read names -> sites)."""
     added: dict[str, set[str]] = defaultdict(set)
     read: dict[str, set[str]] = defaultdict(set)
     for path, tree in _trees(paths):
@@ -113,11 +62,10 @@ def _collect(paths: list[Path]) -> tuple[dict, dict]:
                         and isinstance(node.args[0].value, str)):
                     read[node.args[0].value].add(site)
             elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
-                # Пишут ключом, читают атрибутом: `data["verbosity"] = …` и
-                # `profile.verbosity` — одно и то же поле.
+                # Written by key, read by attribute: d["k"] = ... and obj.k are one field.
                 read[node.attr].add(site)
             elif isinstance(node, ast.Compare):
-                # Разбор по имени — тоже потребление: `drive == "novelty_need"`.
+                # Comparing with the name is a read too: drive == "novelty_need".
                 for part in (node.left, *node.comparators):
                     if isinstance(part, ast.Constant) and isinstance(part.value, str):
                         read[part.value].add(site)
@@ -129,7 +77,7 @@ def _collect(paths: list[Path]) -> tuple[dict, dict]:
 
 
 def _mentions(paths: list[Path]) -> set[str]:
-    """Всё, что вообще названо: имена, атрибуты, строки-имена."""
+    """Everything named at all: names, attributes, string constants."""
     seen: set[str] = set()
     for _path, tree in _trees(paths):
         for node in ast.walk(tree):
@@ -150,7 +98,7 @@ def main() -> int:
 
     dead = {k: v for k, v in added.items()
             if k not in read and _OUR_FIELD.match(k)}
-    only_tests = {k for k in dead if k in read_t}  # читает только обвязка
+    only_tests = {k for k in dead if k in read_t}  # read only by tests
     print(f"ПОЛЯ, дописанные в структуру: {len(added)}")
     print(f"  не читает никто в работе: {len(dead)}"
           f" (из них читают только тесты: {len(only_tests)})")
@@ -164,10 +112,7 @@ def main() -> int:
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
-            # Украшенную функцию зовёт украшение, а не имя. Прогулка по
-            # списку 2026-09-20: из тринадцати «мёртвых» четыре оказались
-            # проверками полей pydantic (`@field_validator`) — их вызывает
-            # библиотека, и по имени их не зовёт никто и не должен.
+            # A decorated function is called by its decorator (e.g. pydantic validators).
             if node.decorator_list:
                 continue
             defined[node.name] = f"{rel}:{node.lineno}"

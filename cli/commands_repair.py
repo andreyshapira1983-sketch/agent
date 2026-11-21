@@ -1,12 +1,7 @@
-"""Self-repair REPL commands (:repair, :propose-repair).
-
-Split out of ``main.py``. Both handlers drive the agent only through its public
-``propose_repair`` / ``repair`` methods plus ``cli.parsers`` and the
-``core.self_repair.RepairProposal`` model — never back into ``main`` — so there
-is no import cycle. ``main.py`` re-exports both handlers for the REPL dispatch.
-"""
+"""Self-repair REPL commands (:repair, :propose-repair)."""
 from __future__ import annotations
 
+# main.py re-exports these handlers, so nothing here may import main (import cycle).
 import sys
 from typing import TYPE_CHECKING
 
@@ -22,8 +17,7 @@ if TYPE_CHECKING:
 def _handle_repair(rest: str, agent: AgentLoop, workspace: Path) -> bool:
     """`:repair <target_path> [proposal_file] [test_path...] [--pattern PAT]`.
 
-    When called with only <target_path>, auto-generates a proposal via
-    propose_repair and immediately applies it (one-click repair).
+    With only <target_path> it generates a proposal and applies it at once.
     """
     tokens = rest.split()
     if not tokens:
@@ -47,14 +41,12 @@ def _handle_repair(rest: str, agent: AgentLoop, workspace: Path) -> bool:
     target_path = tokens[0]
     remaining = tokens[1:]
 
-    # Detect whether the second token looks like a proposal file (ends with .py
-    # and exists in the workspace) or is a test path / flag.
+    # The second token is a proposal file only if it is an existing .py outside tests/.
     proposal_path: str | None = None
     test_paths: tuple[str, ...]
     if remaining:
         candidate = remaining[0]
         candidate_p = workspace / candidate
-        # Treat as proposal_file only when it exists AND is not under tests/
         if (
             not candidate.startswith("tests")
             and candidate_p.exists()
@@ -113,7 +105,7 @@ def _handle_repair(rest: str, agent: AgentLoop, workspace: Path) -> bool:
             ),
             workspace_root=workspace,
         )
-    except Exception as exc:  # noqa: BLE001 — reason stated above
+    except Exception as exc:  # noqa: BLE001 — a command names its failure and returns
         print(f"repair failed before controller run: {type(exc).__name__}: {exc}", file=sys.stderr)
         return True
 

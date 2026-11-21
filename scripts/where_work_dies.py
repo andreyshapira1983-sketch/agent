@@ -1,20 +1,4 @@
-"""Где именно дохнет работа: один прогон — три рубежа, отсортированных по цене.
-
-Зачем. Дефекты находились тем, что читающий спотыкался о странность в
-журнале: сегодня — снятый шаг, завтра — обвинение детектора. Статистика при
-этом каждый раз собиралась в блокноте заново и выбрасывалась, поэтому
-следующий заход снова начинался с блуждания, а не с верхней строки списка.
-Прибор, который ранжирует, стоит сорок строк и делает удар точечным.
-
-Три рубежа, на которых работа пропадает, — в порядке хода прогона:
-
-1. ШАГ снят правилом допуска и до инструмента не доехал (core/step_sanitizer).
-2. ЭПИЗОД записан, но в опыт не допущен (core/smart_memory) — прогон был,
-   учиться на нём нельзя.
-3. ЦЕЛЬ не признана достигнутой (core/success_check).
-
-Считается по трассам, а не по памяти: `python scripts/where_work_dies.py [дней]`.
-"""
+"""Rank where work is lost in recent traces: rejected steps, unadmitted episodes, unmet goals."""
 from __future__ import annotations
 
 import glob
@@ -32,7 +16,7 @@ _NUM = re.compile(r"\d+")
 
 
 def _generalise(reason: str) -> str:
-    """Причина без частностей: имя файла и число — не разные причины."""
+    """Strip specifics from a reason: another file name or number is not another reason."""
     return _NUM.sub("N", _QUOTED.sub("'…'", reason))[:90]
 
 
@@ -72,14 +56,10 @@ def _rows(days: float) -> tuple[Counter, list[dict], Counter, Counter]:
 
 
 def _episode_wall(p: dict) -> str:
-    """Первый рубеж, о который эпизод разбился, — или допуск."""
+    """Return the first gate that kept the episode out of experience, or its admission."""
     if p.get("usage_eligible") is True:
         return "допущен в опыт"
-    # Дисквалифицирующих сигналов ЧЕТЫРЕ, а не один. Первое чтение этого
-    # отчёта 2026-09-20 спрашивало только о самопротиворечии, и 49 эпизодов
-    # попали в «иную причину» — на деле их закрыл `content_refuted`,
-    # крупнейший барьер из всех: 105 из 142 недопущенных. Список берётся из
-    # самого правила, чтобы отчёт не разошёлся с ним снова.
+    # The signal list comes from the rule itself so this report cannot drift from it.
     from core.smart_memory import DISQUALIFYING_DEFECT_SIGNALS
 
     hit = sorted(DISQUALIFYING_DEFECT_SIGNALS & set(p.get("defect_signals") or ()))
@@ -95,17 +75,7 @@ def _episode_wall(p: dict) -> str:
 
 
 def _nerve_map_verdict() -> list[str]:
-    """Согласна ли карта нервной системы с телом — именами, а не счётом.
-
-    Почему это здесь, а не только в общем прогоне тестов. Перепись
-    `knowledge/maps/cns_census.json` покраснела 2026-09-20 в 12:36, когда в
-    синтез вшили узел `_rewrite_if_off_topic` и не внесли его в карту. Сигнал
-    пришёл немедленно и правильный. Его не услышали: полный прогон дал семь
-    падений, шесть из них нашлись и на старом коммите, и вывод был сделан по
-    СЧЁТУ — «шесть там, шесть здесь, значит не моё». Одно из шести было моим.
-
-    Счёт падений скрывает подмену состава. Поэтому здесь печатаются имена.
-    """
+    """Names of failing CNS census tests: names, unlike a count, expose a swapped failure."""
     try:
         done = subprocess.run(
             [sys.executable, "-m", "pytest", "-q", "-p", "no:randomly",
@@ -119,6 +89,7 @@ def _nerve_map_verdict() -> list[str]:
 
 
 def main(days: float) -> None:
+    """Print the report for the last ``days`` days; run: where_work_dies.py [days], default 4."""
     steps, episodes, goals, refutations = _rows(days)
     print(f"=== за последние {days:g} сут ===\n")
     print(f"ШАГИ, снятые правилом допуска: {sum(steps.values())}")
@@ -129,8 +100,7 @@ def main(days: float) -> None:
     for wall, n in walls.most_common(10):
         share = 100.0 * n / max(1, len(episodes))
         print(f"  {n:4d}  ({share:2.0f}%)  {wall}")
-    # Почему куски объявлены ложью. До 2026-09-20 этого в журнале не было
-    # вовсе, и код причины приходилось восстанавливать из трасс вручную.
+    # Refutation reason codes; traces older than the logging change have none.
     print(f"\nОПРОВЕРЖЕНИЯ по коду причины: {sum(refutations.values())}")
     for code, n in refutations.most_common(10):
         print(f"  {n:4d}  {code}")

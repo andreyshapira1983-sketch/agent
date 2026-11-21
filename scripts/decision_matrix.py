@@ -1,6 +1,8 @@
-"""Матрица решений: один фактор меняется, остальные держатся.
+"""Decision matrix for select_best_next_action: each scenario varies one factor.
 
-Замер, отвергнутые варианты и границы: MIR-160 в docs/audit/MASTER_ISSUE_REGISTRY.md.
+Run: python scripts/decision_matrix.py [--json]. Prints one row per scenario
+(goal subject, picked action, grounds, how it was decided, candidates);
+--json prints the rows as JSON instead.
 """
 from __future__ import annotations
 
@@ -17,8 +19,7 @@ from core.best_next_action import (
     unresolved_goal_targets,
 )
 
-#: Живой репозиторий как источник истины о существовании файлов: предмет цели
-#: разрешается ровно так же, как в бою.
+#: The live repository decides whether a file exists, so goal subjects resolve as in production.
 _ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -26,7 +27,7 @@ def _exists(rel: str) -> bool:
     return (_ROOT / rel).is_file()
 
 
-#: Базовые сигналы — «всё здорово». Каждый сценарий ниже меняет РОВНО ОДНО.
+#: Baseline signals: all healthy. Each scenario below changes exactly one thing.
 _BASE: dict[str, object] = {
     "result_status": "ok",
     "tests_health": "ok",
@@ -59,8 +60,7 @@ _GOAL_NONE = "Разобраться, почему агент повторяет
 _GOAL_GHOST = "Проследить core/no_such_module и описать его места вызова"
 _GOAL_SYNTH = "Проследить core/loop_synthesis.py и описать его места вызова"
 
-#: Дефект, названный ВТОРЫМ: до починки его не видели никогда, потому что
-#: генератор возвращал первую запись по порядку файла.
+#: Listed second on purpose: selection must not just take the first entry in file order.
 _ISSUE_SYNTH = {
     "title": "Investigate recurring detector signal: self_contradiction",
     "status": "open",
@@ -70,7 +70,7 @@ _ISSUE_SYNTH = {
     "action": "investigate_detector_signal",
 }
 
-#: (имя, что меняется, переопределения). Порядок — от «нечего делать» к помехам.
+#: (name, what varies, overrides), ordered from "nothing to do" to interference.
 SCENARIOS: list[tuple[str, str, dict]] = [
     ("пустой бэклог, всё здорово", "ничего", {"goal": _GOAL_LOOP}),
     ("дефект про ТОТ ЖЕ файл", "цель совпала с предметом дефекта",

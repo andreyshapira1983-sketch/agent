@@ -1,37 +1,6 @@
-"""EXPERIMENTAL validator for the first physical `.qm` specimen. Not production.
+"""Experimental standalone validator: do a `.qm` specimen's links to external code still hold?
 
-Nothing in the agent's runtime imports this. It is a standalone probe answering
-one question: can another physical file identify a specific semantic object
-inside `main.qm`, resolve the external boundary it is linked to, and verify
-that the asserted relationship is still TRUE?
-
-The specimen asserts; this validator compares those assertions against FACTS
-extracted by `scripts/qm_ps_anchor.ps1`, which uses PowerShell's own parser.
-Neither half is allowed to do the other's job: the bridge never asserts, and
-this file never reads the target's text.
-
-It also walks the specimen's `certified_claims` bindings, which connect it to
-claim certificates that decide their own validity by re-evaluation. A binding
-carries no value: the specimen names a carrier its boundary emits and gates the
-dependent state on the certificate's verdict.
-
-Five outcomes, deliberately distinct, because the audit that produced the
-specimen found that a signal firing on *any* edit cannot be counted as
-behavioural evidence:
-
-    0  GREEN        every link's properties hold and every bound state is usable
-    1  BROKEN       a semantic property is FALSE -- the relationship is wrong
-    2  STALE        properties still hold, but a target's bytes moved;
-                    re-verification is owed, the relationship is not broken
-    3  UNRESOLVABLE a specimen, entity, target, anchor or certificate could not
-                    be found -- nothing was verified either way
-    5  DEPENDENT_UNAVAILABLE
-                    the graph is intact and a certificate REFUSED. The bound
-                    state may not be read. This is the system working.
-
-A run that merely parses `main.qm` exits 3, not 0. Syntax is not evidence.
-
-Usage:  python scripts/qm_link_check.py [path/to/specimen.qm]
+Usage: python scripts/qm_link_check.py [specimen.qm ...]   (default: main.qm app.qm)
 """
 from __future__ import annotations
 
@@ -45,15 +14,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from qm_gate_claim import gate
 
+# STALE: properties hold, a target's bytes moved; UNRESOLVABLE: something not found, nothing
+# verified; DEPENDENT_UNAVAILABLE: links intact, a certificate refused (bound state unusable).
 GREEN, BROKEN, STALE, UNRESOLVABLE, DEPENDENT_UNAVAILABLE = 0, 1, 2, 3, 5
 
-# A certificate that refuses is the graph WORKING, not failing: the link is
-# intact and the dependent state is simply not usable. It gets its own code so
-# a refusal is never confused with a broken relationship. The mapping from a
-# certificate's verdict to that decision lives in scripts/qm_gate_claim.py.
-
-# Exit codes are not a severity order: STALE is 2 and BROKEN is 1, so `max`
-# over several links would rank "target moved" above "relationship is false".
+# Exit codes are not a severity order (STALE=2 > BROKEN=1), so results combine by this rank.
 _SEVERITY = {GREEN: 0, STALE: 1, DEPENDENT_UNAVAILABLE: 2, BROKEN: 3, UNRESOLVABLE: 4}
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -244,12 +209,7 @@ def _python_facts(bridge: Path, module_file: Path, function: str) -> dict | None
         return None
 
 def _check_producer_bindings(specimen: dict) -> int:
-    """Walk bindings that assert THIS boundary produces a carrier.
-
-    A producer binding is verified with the same discipline as an external link:
-    the anchor is resolved by the language's own parser, the specimen supplies the
-    assertions, and the certificate it defers to is resolved but never copied.
-    """
+    """Verify bindings asserting this boundary produces a carrier, then gate on its certificate."""
     bindings = specimen.get("producer_bindings") or []
     if not bindings:
         return GREEN
@@ -379,14 +339,7 @@ def _check_producer_bindings(specimen: dict) -> int:
 
 
 def _check_certified_claims(specimen: dict) -> int:
-    """Walk the bindings that connect this specimen to claim certificates.
-
-    A binding is not a copy. The specimen names a carrier its own boundary emits
-    and delegates that carrier's certified STATE to a certificate that decides for
-    itself, by re-evaluation. So this walker resolves the certificate, runs it,
-    and gates the dependent state on the status it returns -- it never reads a
-    value out of the binding, because there is none to read.
-    """
+    """Gate each bound dependent state on its certificate's own verdict (bindings hold no value)."""
     bindings = specimen.get("certified_claims") or []
     if not bindings:
         return GREEN

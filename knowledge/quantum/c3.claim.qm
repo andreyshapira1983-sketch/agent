@@ -73,14 +73,14 @@
         "value_from": {
           "literal": true
         },
-        "_evidence": "app/bootstrap.py:224 -- _env_bool(\"AGENT_KNOWLEDGE_AUTO_WRITE\", True)"
+        "_evidence": "app/bootstrap.py:179 -- _env_bool(\"AGENT_KNOWLEDGE_AUTO_WRITE\", True)"
       }
     ]
   },
   "causal_path": {
     "_status": "PROVEN by mutation on both sides, not by reading.",
     "report_side": [
-      "app/bootstrap.py:224 -- _env_bool(\"AGENT_KNOWLEDGE_AUTO_WRITE\", True) is placed in the session_start payload",
+      "app/bootstrap.py:179 -- _env_bool(\"AGENT_KNOWLEDGE_AUTO_WRITE\", True) is placed in the session_start payload",
       "the journal record is written by the same call that C2's causal closure traced"
     ],
     "causal_mutation": "AGENT_KNOWLEDGE_AUTO_WRITE=0 -> the journal records false. Baseline with the variable unset records true.",

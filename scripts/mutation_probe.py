@@ -1,24 +1,8 @@
 """Break the code on purpose and see whether the tests notice.
 
-Census item C2. A test that has never failed is not evidence. Coverage says
-a line RAN; it does not say a break in that line would be caught. The
-difference is not academic — a test with no assertion gives full coverage
-and catches nothing.
-
-Deliberately small and deliberately not a framework. It applies a handful of
-mutations that correspond to real defects this project has actually shipped
-— a comparison flipped, a boundary moved by one, a truth value inverted, a
-call removed — runs a chosen slice of the suite, and restores the file.
-Nothing is left mutated: the original is written back in a `finally`, and
-the run refuses to start on a dirty working tree so a crash can never be
-mistaken for the program.
-
-Exit codes, and the difference between the last two matters: 0 when every
-mutation was caught, 1 when any survived — so it can gate a change the way
-the ratchets do — and 2 when the probe REFUSED to run at all, either because
-the target has uncommitted changes or because the selected tests were
-already red. A refusal is not a finding, and a caller must be able to tell
-them apart.
+Applies one mutation at a time to TARGET (comparison flipped, number +1, boolean inverted),
+runs the selected tests and restores the file. Exit 0: every mutation caught; 1: some
+survived; 2: refused (TARGET has uncommitted changes, or the tests are red or uncollectable).
 """
 from __future__ import annotations
 
@@ -31,8 +15,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-#: Comparison flips. Each is a defect shape with a history here: an off-by-one
-#: on a threshold, a gate that admits what it should refuse.
+#: Comparison flips: an off-by-one threshold, a gate that admits what it should refuse.
 _COMPARE_SWAP = {
     ast.Lt: ast.LtE, ast.LtE: ast.Lt,
     ast.Gt: ast.GtE, ast.GtE: ast.Gt,
@@ -109,11 +92,7 @@ def enumerate_mutations(source: str) -> list[Mutation]:
     index = 0
     while True:
         try:
-            # ONE parse per round, shared between the skip set and the walk.
-            # A first version parsed twice and matched nodes by `id()`, so the
-            # skip set referred to objects the mutator never saw and silently
-            # did nothing. Caught before it ran, but it is exactly the kind of
-            # inert guard this project keeps finding, so it is written down.
+            # One parse per round: the skip set matches nodes by id(), so it needs this same tree.
             tree = ast.parse(source)
             mutator = _Mutator(index, skip=_default_value_nodes(tree))
             tree = mutator.visit(tree)
@@ -131,9 +110,8 @@ def enumerate_mutations(source: str) -> list[Mutation]:
     return out
 
 
-#: pytest's own vocabulary. 1 means tests ran and failed; 4 means the
-#: arguments were unusable (a path that is not there) and 5 that nothing was
-#: collected. Neither of the last two is a statement about the code.
+#: pytest exit codes: 1 tests failed; 4 unusable arguments; 5 nothing collected.
+#: Only 1 says something about the code.
 _PYTEST_FAILED, _PYTEST_USAGE, _PYTEST_NO_TESTS = 1, 4, 5
 
 
@@ -225,11 +203,7 @@ def main(argv: list[str] | None = None) -> int:
 
     survived = probe(args.target, args.tests, limit=args.limit)
     if survived < 0:
-        # `probe` refused: the selection was already red, so a survivor would
-        # prove nothing. That is not the same answer as "mutations survived",
-        # and collapsing both into 1 would let a caller read a refusal as a
-        # finding. Shares exit 2 with the uncommitted-changes refusal above:
-        # both mean "the probe did not run", which is what a caller must act on.
+        # A refusal is not a finding: exit 2, like the uncommitted-changes refusal above.
         return 2
     return 1 if survived else 0
 

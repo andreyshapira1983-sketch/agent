@@ -1,14 +1,9 @@
 #!/usr/bin/env python3
-"""Run the capability bench and print where the agent stands today.
+"""Run the capability bench and print verdict and reason scores per category.
 
-**Reason** — did the system produce a sentence the agent could REPAIR itself
-from? This is the operator's own criterion: if the agent gets the reason for
-its error, fixes its reasoning and does better on a similar task, capability
-grew; if only the label moves, the instrument got honest and the agent did
-not. So the reason column is scored separately and is never inferred from a
-correct verdict.
-
-Read-only: no store is written, no model is called, nothing costs money.
+"Reason" counts a sentence the agent could repair its reasoning from; it is scored
+separately, never inferred from a correct verdict. Read-only: no store is written,
+no model is called, nothing costs money.
 """
 from __future__ import annotations
 
@@ -41,9 +36,7 @@ def _run_claim(task: Task) -> tuple[bool, bool, str]:
     chunk = report.chunks[0]
     said_holds = chunk.verdict == "verified"
 
-    # `ClaimChunk` is (text, citations, matched_evidence_ids, verdict). There is
-    # no field a reason could live in, so this axis cannot score above zero
-    # without a change to the data structure — measured, not assumed.
+    # A chunk carries a reason only when a check refuted the claim and could say why.
     reason = bool(getattr(chunk, "reason", "") or getattr(chunk, "explanation", ""))
     return said_holds == task.holds, reason, chunk.verdict
 
@@ -78,8 +71,7 @@ def _run_error_reuse(task: Task) -> tuple[bool, bool, str]:
         ok = ok and decision.action.startswith("abort")
     if task.payload.get("must_forbid_repeat"):
         ok = ok and bool(decision.forbidden_actions)
-    # The reason axis: does the block handed to the NEXT attempt carry the
-    # failure's stated cause, not merely its code?
+    # Reason axis: the next attempt's context must carry the failure's cause, not just its code.
     carried = bool(context) and any(h.reason in context for h in history)
     return ok, carried, (
         f"action={decision.action} "

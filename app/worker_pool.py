@@ -1,28 +1,4 @@
-"""Bounded asyncio worker pool for the daemon dispatcher (plan items 3.2–4.1).
-
-Consumes :class:`~app.priority_event_queue.DaemonEvent` values from an existing
-:class:`~app.priority_event_queue.PriorityEventQueue` (3.1) without owning the
-queue store or the :class:`~app.daemon.DaemonLoop`.
-
-Contract
---------
-* At most ``max_workers`` handler coroutines run concurrently (default ``2``).
-* Workers are asyncio tasks — they must ``await`` and must not block the loop
-  with long synchronous work.
-* An exception in one handler is logged and isolated; other workers continue.
-* Each handler runs under a configurable ``task_timeout`` (3.3). On timeout the
-  in-flight awaitable is cancelled, the event is **not** counted as success,
-  and a structured log line records the timeout reason.
-* Explicit cancellation (:class:`asyncio.CancelledError`) is also **not**
-  counted as success.
-* With an :class:`InFlightCheckpointStore`, each event becomes durable before
-  handler code starts and is removed on every non-crash terminal path (4.1).
-* :meth:`WorkerPool.shutdown` stops accepting new work (closes the queue),
-  waits up to ``drain_timeout`` for in-flight handlers, then cancels stragglers.
-* Repeated :meth:`shutdown` is safe.
-
-``agent_tick.py`` is untouched.
-"""
+"""Bounded asyncio worker pool that runs daemon event handlers from a PriorityEventQueue."""
 from __future__ import annotations
 
 import asyncio
@@ -44,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_WORKERS = 2
 DEFAULT_DRAIN_TIMEOUT = 10.0
-# Default per-event handler budget (plan 3.3). ``None`` disables the limit.
+# Seconds per event handler; None disables the limit.
 DEFAULT_TASK_TIMEOUT = 60.0
 _CANCEL_GRACE_SECONDS = 5.0
 
@@ -120,18 +96,12 @@ class WorkerPoolError(RuntimeError):
 class WorkerPool:
     """Run up to ``max_workers`` concurrent handlers over a priority queue.
 
-    Parameters ---------- queue: Existing :class:`PriorityEventQueue` to
-    consume (not duplicated). handler: Async callback invoked once per
-    event. Exceptions are logged and do not stop the pool. max_workers:
-    Concurrent handler limit (default :data:`DEFAULT_MAX_WORKERS`).
-    drain_timeout: Seconds to wait for in-flight handlers during
-    :meth:`shutdown` before cancelling them. task_timeout: Seconds allowed
-    for a single handler. ``None`` disables per-task timeout. Timed-out work
-    is cancelled and recorded in :attr:`timeout_count` (never as a
-    successful :attr:`processed_count`). checkpoint_store: Optional durable
-    in-flight store. When provided, an event checkpoint is atomically
-    persisted before its handler begins and removed after success, error,
-    timeout, or cancellation. Existing callers may omit it.
+    Args:
+        drain_timeout: seconds :meth:`shutdown` waits for in-flight handlers.
+        task_timeout: seconds per handler (None = no limit); a timed-out event
+            counts in ``timeout_count``, never in ``processed_count``.
+        checkpoint_store: optional; an event is checkpointed before its handler
+            starts and removed after success, error, timeout or cancellation.
     """
 
     def __init__(
@@ -230,11 +200,7 @@ class WorkerPool:
         ]
 
     async def run(self) -> None:
-        """Start workers (if needed) and wait until they all exit.
-
-        Workers exit when the queue is closed and drained (see
-        :meth:`shutdown`). Cancellation of this coroutine triggers shutdown.
-        """
+        """Start workers if needed and wait until they exit; cancelling this shuts the pool down."""
         self.start()
         try:
             await asyncio.gather(*self._workers, return_exceptions=True)
@@ -243,11 +209,7 @@ class WorkerPool:
             raise
 
     async def shutdown(self, *, drain_timeout: float | None = None) -> None:
-        """Stop accepting work, drain or cancel in-flight handlers.
-
-        Closes the shared :class:`PriorityEventQueue` so :meth:`get` waiters
-        unblock. Safe to call repeatedly.
-        """
+        """Close the queue, then drain or cancel in-flight handlers; safe to call repeatedly."""
         if self._shutting_down and not self._workers and not self._in_flight:
             return
         self._shutting_down = True
@@ -359,7 +321,7 @@ class WorkerPool:
                 self._task_timeout,
             )
         except asyncio.CancelledError:
-            # Propagate; caller records cancelled_count. Never count as success.
+            # The caller counts the cancellation; never count it as success.
             raise
         except Exception:
             self._errors += 1

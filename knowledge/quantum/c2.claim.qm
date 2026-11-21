@@ -113,13 +113,13 @@
   "causal_path": {
     "_status": "RESOLVED by instrumentation, not inference. Every hop below was measured; the two that were guessed first were both wrong.",
     "chain": [
-      "app/bootstrap.py:145 -- ModelRouter.from_env()",
-      "app/bootstrap.py:161 -- llm = model_router.for_role(ModelRole.SYNTHESIZER)",
+      "app/bootstrap.py:118 -- ModelRouter.from_env()",
+      "app/bootstrap.py:124 -- llm = model_router.for_role(ModelRole.SYNTHESIZER)",
       "ModelRouter.for_role -- model = route.model or self.default_model; provider = route.provider or self.default_provider",
       "core/model_router.py:784 _llm_factory -- _default_provider_name(None) is 'anthropic'; anthropic has NO credentials here, so the healing branch substitutes the first credentialed provider (openai) and DROPS the requested model, by design and by comment: 'drop the model so the substitute's own default is used'",
       "core/llm.py:97 LLM.__init__ -- self.model = None or _default_model('openai')",
       "core/llm.py:32 _default_model -- returns AGENT_MODEL when set, otherwise the literal 'gpt-4o-mini'",
-      "app/bootstrap.py:204 -- 'llm_model': llm.model is written into the session_start record"
+      "app/bootstrap.py:161 -- 'llm_model': llm.model is written into the session_start record"
     ],
     "causal_mutation": "AGENT_MODEL=via-agent-model -> the journal records via-agent-model. The projected value changes.",
     "non_causal_mutation": "AGENT_SYNTHESIZER_MODEL=gpt-5.4 -> the route reason changes to env:AGENT_SYNTHESIZER, proving the mutation LANDED, while the journal value stays gpt-4o-mini. A neighbour on the same table that this projection does not depend on.",

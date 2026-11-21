@@ -1,13 +1,4 @@
-"""Команда `:learn` — приобретение знаний из файлов проекта.
-
-Приехало из `cli/commands_misc.py`, которого больше нет. Тот файл сам себя
-называл «разное» и держал шесть несвязанных тем: по имени нельзя было узнать,
-что внутри, а войти в него приходилось за любой из шести.
-
-Отделена от команд разбора знаний (`cli/commands_knowledge_review.py`)
-намеренно: эта ПИШЕТ — читает файлы проекта и заводит записи, — а те только
-показывают уже накопленное. Разные глаголы, разная цена ошибки.
-"""
+"""The ``:learn`` command: plan which project files to read and ingest them as knowledge."""
 from __future__ import annotations
 
 import sys
@@ -18,7 +9,7 @@ from cli.parsers import _split_meta_args
 from core.ingestion import DEFAULT_PROJECT_LIMIT, ingest_files
 from core.learning_planner import LearningPlanner
 
-if TYPE_CHECKING:  # pragma: no cover — только для подписи
+if TYPE_CHECKING:  # pragma: no cover — type hints only
     from core.loop import AgentLoop
 
 

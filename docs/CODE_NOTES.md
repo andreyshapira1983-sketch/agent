@@ -1316,7 +1316,7 @@ not among them, though `docker/daemon_loop.py` is the supervisor that repeats
 Found 2026-08-14 while measuring whether four uncommitted files were
 load-bearing. With `compose.yaml` moved aside, INV-3 reported
 `AGENT_DOCKER_TICK_TIMEOUT_SECONDS` as documented-but-read-by-nobody — while
-`docker/daemon_loop.py:94` reads it. The invariant had been passing because
+`docker/daemon_loop.py:89` reads it. The invariant had been passing because
 `compose.yaml` happened to name the flag in its environment block, and the
 checker reads `compose.yaml`/`Dockerfile` as extra text. A coincidence in a
 config file was standing in for coverage.

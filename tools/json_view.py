@@ -1,17 +1,4 @@
-"""Компактный вид JSON-ответа: факты не тонут в длинных полях.
-
-Веб-экзамен 2026-09-19, третий прогон, N04 («минимальный Python для последней
-версии ruff»): `https://pypi.org/pypi/ruff/json` — 1 МБ; поле
-`info.requires_python` лежит на 20-м килобайте, за README в `info.description`,
-а `releases` — сотни версий со списками файлов. Агент видит из ответа около
-7 КБ (круг наблюдения, выдержка улики), поле до него не доходило; он полез за
-ним в лабораторию по сети, и лаборатория честно отказала.
-
-Вид: длинные строки урезаны, у словаря на сотни ключей остаются одни ключи,
-длинные списки — голова и счёт. Обрезанное по лимиту тело разбирается по
-ЦЕЛЫМ членам верхнего уровня: полуразобранного значения в виде нет. Хэш
-страницы по-прежнему считает инструмент над полным телом.
-"""
+"""Compact view of a JSON response, so short facts are not buried behind long fields."""
 from __future__ import annotations
 
 import json
@@ -26,7 +13,7 @@ _COLON = re.compile(r"\s*:\s*")
 
 
 def _complete_members(text: str) -> dict[str, Any] | None:
-    """Целые члены верхнего объекта из тела, обрезанного посередине."""
+    """Complete top-level members of a JSON object whose body was cut mid-way."""
     s = text.lstrip()
     if not s.startswith("{"):
         return None
@@ -59,7 +46,7 @@ def _clip(value: Any) -> Any:
 
 
 def compact_json_view(text: str, *, truncated: bool) -> str | None:
-    """Компактный вид или None, если это не JSON-объект/массив."""
+    """Return the compact view, or None if the text is not a JSON object or array."""
     try:
         data, whole = json.loads(text), True
     except ValueError:

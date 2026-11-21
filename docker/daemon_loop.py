@@ -1,9 +1,4 @@
-"""Run ``agent_tick.py`` repeatedly inside a long-lived container.
-
-The project daemon is intentionally a one-shot bounded tick. This wrapper keeps
-Docker alive, starts one tick immediately, then sleeps until the next interval.
-It never changes the tick's approval, budget, or dry-run policy.
-"""
+"""Run one bounded ``agent_tick.py`` tick per interval in a long-lived container."""
 from __future__ import annotations
 
 import argparse

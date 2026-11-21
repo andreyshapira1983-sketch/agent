@@ -1,18 +1,4 @@
-"""``:capability-request`` and ``:subagent-proposal`` REPL commands.
-
-Both answer the same shape of operator request -- "you are missing X, propose how
-to get it" -- and both end in the same place: a proposal the human must approve.
-Neither acts on its own.
-
-* ``:capability-request <goal> [--submit] [--json]`` names the missing connector
-  or capability boundary for a goal and, with ``--submit``, files it in the
-  approval inbox.
-* ``:subagent-proposal <goal> [--submit]`` drafts a bounded sub-agent contract for
-  a goal that looks like it needs delegation, and with ``--submit`` files that.
-
-Extracted verbatim from ``main.py`` as part of the incremental CLI decomposition;
-``main.py`` re-exports both handlers so existing callers keep working.
-"""
+"""``:capability-request`` and ``:subagent-proposal``: proposals the human must approve."""
 from __future__ import annotations
 
 import json

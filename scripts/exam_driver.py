@@ -1,20 +1,4 @@
-"""Drive one REPL session of the agent for an examination: questions arrive
-as files, answers leave as files; the process stays alive across turns so
-working memory carries the dialogue.
-
-Two lessons carved into it on 2026-09-05:
-* every question is sent inside a `:task-begin … :task-end` block — the
-  keyboard intent router hijacked the word «модели» into `:models`;
-* the end of a turn is the turn's own closing marker, NEVER silence: the
-  first version ended a turn after 40 s of quiet output, the planner was
-  silent for 44 s, and the stop that followed killed the process before
-  synthesis — a live provenance check was lost to the harness, not to the
-  agent (ACTUATION_TEST_2026-09-05.md in git history, raw timeline).
-
-Protocol (paths under ``--dir``): ``q/next.txt`` = the next question;
-``a/turn_<n>.md`` = the answer with the journals' deltas; ``q/stop`` =
-finish the session. Run from the repository root.
-"""
+"""Drive one REPL exam session: reads <dir>/q/next.txt, writes <dir>/a/turn_<n>.md; q/stop ends."""
 from __future__ import annotations
 
 import argparse
@@ -28,9 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path.cwd()))
 
-#: The line the loop prints when a turn is fully over (episodic + procedural
-#: memory written). Everything the operator reads comes before it or right
-#: after it; the REPL then waits for the next line of stdin.
+#: Printed by the loop when a turn is fully over (episodic and procedural memory written).
 END_OF_TURN_MARKERS: tuple[str, ...] = ("procedural_memory_update",)
 #: After the marker, the answer text is flushed; this short grace collects it.
 GRACE_AFTER_MARKER = 6.0
@@ -56,8 +38,7 @@ def _usage_rows() -> list[dict]:
 
 
 def turn_is_over(lines: list[str], start: int) -> bool:
-    """A turn is over when its closing marker has been printed. Silence is
-    not a signal: a 44-second planner call prints nothing."""
+    """True once the turn's closing marker is printed; silence is no signal."""
     return any(any(m in line for m in END_OF_TURN_MARKERS) for line in lines[start:])
 
 
@@ -65,9 +46,7 @@ def wait_for_turn_end(
     buf: list[str], start: int, *, proc_alive, timeout: float = TURN_TIMEOUT,
     grace: float = GRACE_AFTER_MARKER, sleep=time.sleep, clock=time.monotonic,
 ) -> str:
-    """Block until the closing marker appears (then a short grace for the
-    answer text), the process dies, or the timeout. Returns why it returned:
-    'marker' | 'exit' | 'timeout'."""
+    """Wait for the closing marker (plus grace), process exit or timeout; return which one."""
     t0 = clock()
     while True:
         if turn_is_over(buf, start):
@@ -96,11 +75,7 @@ def main(argv: list[str] | None = None) -> int:
     adir.mkdir(parents=True, exist_ok=True)
     stop = qdir / "stop"
 
-    # Measured 2026-09-05 11:45: pytest spawned by his run_tests tool inherits
-    # this driver's OPEN stdin pipe and never starts (0 s CPU) until the tool's
-    # ceiling — 14 s with stdin closed, 70 s with it open under a 60-s ceiling.
-    # The defect is the tool's (a child should get stdin=DEVNULL) and is his
-    # cargo; the driver only caps the loss at one minute instead of fifteen.
+    # pytest started by run_tests inherits this open stdin and stalls to its ceiling: cap at 60 s.
     env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1",
            "AGENT_TEST_TIMEOUT_SECONDS": os.environ.get("AGENT_TEST_TIMEOUT_SECONDS", "60")}
     proc = subprocess.Popen(  # nosec B603 — fixed argv, our own entry point

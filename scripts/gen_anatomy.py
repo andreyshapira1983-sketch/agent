@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""Generate knowledge/generated/AGENT_ANATOMY.md as a grouped module index.
-
-Groups the flat core/*.py modules under the architecture sections (see
-"архитектура автономного Агента.txt" / AGENT_DOCTRINE) so the anatomy map is
-navigable. Modules physically stay in core/ (paths are semantic data elsewhere),
-so every row is still `core/<name>` and the read-only drift check keeps working.
-
-Run:  python scripts/gen_anatomy.py
-"""
+"""Generate knowledge/generated/AGENT_ANATOMY.md: the grouped index of core/ and tools/ modules."""
 from __future__ import annotations
 
 import ast
@@ -18,24 +10,14 @@ from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-#: Where the generated map is written. `scripts/agent_anatomy_check.py` declares
-#: the same path as the place it READS, and `tests/test_agent_anatomy_check.py`
-#: asserts the two agree. Measured 2026-08-07: moving the writer alone left the
-#: whole suite green — the checker went on reading a file nobody updated any
-#: more, and both halves looked healthy on their own.
+#: Must equal the path agent_anatomy_check.py reads (a test asserts writer and reader agree).
 DOC_PATH = os.path.join(ROOT, "knowledge", "generated", "AGENT_ANATOMY.md")
 CORE = os.path.join(ROOT, "core")
 
-# Ordered logical groups. Each module name may appear in exactly one group.
-# Таблица групп переехала в core/anatomy_groups.py (MIR-180): полоса
-# самоприменения вправе менять core/*.py и НЕ вправе менять scripts/, а без
-# строки группировки каждый инкрементальный раскол откатывался анатомическим
-# сторожем. Читаем ЛИТЕРАЛ ast-разбором, не импортируя: правило этого скрипта
-# «не исполнять код агента» сохраняется.
+# GROUPS (ordered, each module in one group) lives in core/anatomy_groups.py, which the
+# self-apply lane may edit; it is read as a literal with ast and never imported.
 def load_groups_from_source(source: str) -> list:
-    """The GROUPS literal out of `core/anatomy_groups.py` text, never imported.
-    Public so a proposal that carries its own version of that file can be
-    rendered exactly as this script would (2026-09-04, see `build_document`)."""
+    """The GROUPS literal parsed from core/anatomy_groups.py text (public: proposals use it)."""
     import ast as _ast
 
     for node in _ast.parse(source).body:
@@ -56,8 +38,7 @@ GROUPS: list[tuple[str, str, list[str]]] = _load_groups()
 
 
 def purpose_from_source(source: str) -> str:
-    """The Purpose cell for a module whose SOURCE TEXT is given (a proposed
-    file that is not on disk yet renders the same way as one that is)."""
+    """The Purpose cell for a module given its source text (works for files not on disk yet)."""
     try:
         doc = ast.get_docstring(ast.parse(source)) or ""
     except (SyntaxError, ValueError):
@@ -66,13 +47,7 @@ def purpose_from_source(source: str) -> str:
 
 
 def _first_doc_line(stem: str) -> str:
-    """First *sentence* of the module docstring, rejoined across wrapped lines.
-
-    Reading `splitlines()[0]` used to cut the summary wherever the author had
-    wrapped it, producing map rows that ended mid-clause ("... and the",
-    "... by the"). The docstring's opening paragraph is the summary; a physical
-    line break inside it carries no meaning.
-    """
+    """First sentence of a core module's docstring, rejoined across wrapped lines."""
     path = os.path.join(CORE, f"{stem}.py")
     try:
         return purpose_from_source(Path(path).read_text(encoding="utf-8"))
@@ -92,9 +67,8 @@ def first_sentence(doc: str) -> str:
         if part.strip()
     )
 
-    # Cut at the first sentence end, so a long paragraph does not fill the cell.
-    # A dot only ends a sentence when a space follows and the next word starts a
-    # new one, which keeps "e.g." and "core/loop.py" intact.
+    # Cut at the first sentence end: a dot counts only before whitespace and a non-lowercase
+    # word, so "e.g." and "core/loop.py" stay intact.
     match = re.search(r"(?<!\be\.g)(?<!\bi\.e)[.?!](?=\s+[^a-z]|\s*$)", paragraph)
     sentence = paragraph[: match.end()] if match else paragraph
     return sentence.strip().replace("|", "\\|")
@@ -107,12 +81,8 @@ def _actual_modules() -> set[str]:
     }
 
 
-#: Где что подключается ЗА ПРЕДЕЛАМИ core/. Ночь 24→25.09: агент искал
-#: tools/registry.py, `def build_registry`, `TOOLS =` — угадывал устройство, а
-#: не читал; место регистрации инструментов прочитал только после шести заходов.
-#: Журнал исследований оператора (25.09, «Размер файлов и чтение кода ИИ»):
-#: карта репозитория для агента сильнее нарезки файлов — агенту важнее найти
-#: место. Каждая строка проверена по коду при записи; меняется код — меняется она.
+#: Where things are wired outside core/, so the agent finds them instead of guessing.
+#: Each line was checked against the code; change it when the code changes.
 WIRING = (
     ("Tools are registered in `app/bootstrap.py` — `registry.register(SomeTool(...))`; "
      "there is no separate registry module."),
@@ -127,11 +97,8 @@ WIRING = (
      "(FILE: + SEARCH/REPLACE or LINES blocks) and tried by `patch_check` on a copy of the repo."),
 )
 
-#: Кто судит ответ и в каком порядке (сведение слоёв, слово оператора 25.09:
-#: «кто судит ответы» — раздел карты, не новый документ). Порядок — порядок
-#: хода; «how» — код или модель: судья-модель той же семьи, что и работник,
-#: завышает своё (arXiv 2404.13076), поэтому итоговое «да» уходит Клоду.
-#: Каждый модуль сверяется с core/ тестом `test_the_map_says_who_judges`.
+#: Who judges an answer, in turn order (test_the_map_says_who_judges checks it against core/).
+#: A same-family model judge overrates its own (arXiv 2404.13076), so the final yes is Claude's.
 JUDGES = (
     ("synthesis", "draft_refutation", "code", "a draft that contradicts its own evidence is rewritten once"),
     ("verify", "verifier_core", "code + model", "each claim needs a matching cited source; a model checks the source entails it"),
@@ -171,26 +138,10 @@ def build_document(
     groups: list | None = None,
     purpose=None,
 ) -> str:
-    """Render the whole map as text. Pure apart from reading `core/`.
+    """Render the whole map as text; pure apart from reading ``core/``.
 
-    The three keyword arguments let a caller render the map of a tree that
-    is not on disk — a self-apply proposal adding a module (2026-09-04: the
-    producer wrote its own canned row and never touched the total, so every
-    split proposal with a new module failed the anatomy guard and rolled
-    back; the map in a proposal must be what THIS function writes). Defaults
-    read `core/`, `GROUPS` and each module's docstring as before.
-
-    Split out from :func:`main` so a test can compare the committed document
-    against what the generator would write, without writing anything. Nothing
-    enforced that equality before, which is exactly how `GROUPS` drifted 37
-    modules behind `core/` while the map itself looked in sync — the drift check
-    compares module *names*, and hand-edits kept those correct.
-
-    Raises :class:`ValueError` on a bad `GROUPS`, never `SystemExit`: this is a
-    library function now, and killing the caller's process is not its decision.
-    `SystemExit` derives from `BaseException`, so an ordinary
-    ``except Exception`` around it would not even catch it. :func:`main` turns
-    the error into a message and exit code 1, exactly as before.
+    The keyword arguments let a self-apply proposal render the map of a tree not on disk.
+    Raises ValueError on a bad GROUPS, never SystemExit: this is a library function.
     """
     actual = _actual_modules() if actual is None else set(actual)
     groups = GROUPS if groups is None else groups
@@ -260,8 +211,7 @@ def main() -> int:
     try:
         text = build_document()
     except ValueError as exc:
-        # Same operator-visible contract the old `raise SystemExit(msg)` had:
-        # the message on stderr, exit code 1.
+        # Operator-visible contract: the message on stderr, exit code 1.
         print(exc, file=sys.stderr)
         return 1
     os.makedirs(os.path.dirname(DOC_PATH), exist_ok=True)

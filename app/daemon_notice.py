@@ -10,11 +10,7 @@ from core.approval_inbox import ApprovalInbox
 
 
 def _print_daemon_inbox_notice(workspace: Path) -> None:
-    """Check the approval inbox and print a wake-up notice if items are pending.
-
-    Called once at REPL startup so the user immediately sees anything the
-    background daemon (agent_tick.py) found while they were away.
-    """
+    """Print a startup notice when the daemon left items pending in the approval inbox."""
     try:
         inbox = ApprovalInbox(path=workspace / "data" / "approval_inbox.jsonl")
         pending = inbox.pending()
@@ -31,12 +27,10 @@ def _print_daemon_inbox_notice(workspace: Path) -> None:
         )
         print(f"{'='*60}", file=sys.stderr)
 
-        # Always show the breakdown by operation type — compact, one line each.
         for operation, count in by_operation.most_common():
             print(f"  - {operation}: {count}", file=sys.stderr)
 
         if total <= 5:
-            # Small backlog: show each item on a single trimmed line.
             print(file=sys.stderr)
             for item in pending:
                 first_line = item.summary.splitlines()[0] if item.summary else ""

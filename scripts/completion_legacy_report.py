@@ -1,31 +1,10 @@
-"""What the completion axis says about memory written before it existed.
+"""Read-only report on memory written before the completion axis existed.
 
-Read-only. This script diagnoses, it does not repair: it never writes to a
-store, never migrates an episode, and never resets a counter. Run it to find
-out what the MIR-057 gates would do with the records already on disk.
+Shows what each completion gate would admit from the records on disk, the safe
+backfill candidates (decided by scripts/completion_backfill.py) and procedures whose
+counters rest on legacy or evicted episodes. Never writes to a store.
 
-Two questions it exists to answer.
-
-**Is there anything to migrate?** An episode banked before the axis carries no
-`completion_state`, and the cycle's assembly table cannot reconstruct one: of the
-facts it reads, only `replan_exhausted` is stored, while `aborted_reason` and the
-synthesizer's declaration were never persisted. So for cycle-banked records the
-count is zero, and that number belongs in a report rather than in an assumption.
-Two *writers*, however, settle the axis from evidence they do persist, and rows
-they banked before that fix are recoverable. `scripts/completion_backfill.py` owns
-that decision; this report calls it rather than restating it, so the diagnostic
-and the migration can never disagree about which rows qualify.
-
-**What did the old rule already buy?** The gates stop new credit, they do not
-unwind old credit. A procedure whose counters were earned under the previous
-rule keeps them, stays `active`, and keeps being injected into planning. This
-report quantifies that, carefully: `source_episode_ids` proves a procedure was
-UPDATED BY an episode, not that a particular increment came from it. There is
-no per-increment ledger, so the honest phrasing is "procedures with non-zero
-counters associated with legacy episodes", and the limits of what can be
-attributed are printed alongside the numbers.
-
-    python scripts/completion_legacy_report.py [--workspace PATH]
+Usage: python scripts/completion_legacy_report.py [--workspace PATH]
 """
 from __future__ import annotations
 
@@ -51,9 +30,7 @@ from core.smart_memory import (  # noqa: E402
 )
 from scripts.completion_backfill import writer_backfill_verdict  # noqa: E402
 
-# Similarity is the question-shaped half of the fast-path gate and says
-# nothing about the episode. Held at the maximum so the report measures only
-# what the RECORD would allow.
+# Similarity is held at the maximum so the fast-path gate is judged on the record alone.
 _MAX_SIMILARITY = 1.0
 
 
@@ -73,12 +50,7 @@ def _passes_positive_reuse(episode: EpisodeRecord) -> bool:
 
 
 def _passes_lesson_context(episode: EpisodeRecord) -> bool:
-    """Admission through the curated-lesson arm, which ignores completion.
-
-    Surfacing a past failure as a warning is the whole purpose of the tag,
-    so this is a deliberate exception and is counted on its own line, never
-    as an anomaly.
-    """
+    """Admission through the curated-lesson arm, which ignores completion by design."""
     return _is_lesson(episode) and is_usage_eligible(episode)
 
 
@@ -112,9 +84,7 @@ def build_report(episodes: list[EpisodeRecord], procedures: list[ProcedureRecord
         "procedural debit": [e for e in episodes if procedure_debit_allowed(e)],
     }
 
-    # An anomaly is an UNCLASSIFIED record reaching a gate that is supposed to
-    # require `achieved` or a demonstrated failure. The lesson arm is not one:
-    # it is the agreed exception and is reported separately above.
+    # The lesson arm is the agreed exception, so it never counts as an anomaly.
     anomalies = {
         name: [e.id for e in eps if effective_completion(e) == "unknown"]
         for name, eps in gates.items()
@@ -126,14 +96,7 @@ def build_report(episodes: list[EpisodeRecord], procedures: list[ProcedureRecord
         refs = list(proc.source_episode_ids)
         legacy_refs = [r for r in refs if r in legacy_ids]
         missing_refs = [r for r in refs if r not in live_ids]
-        # MIR-058, the inversion this instrument shipped with: `legacy_ids` is
-        # built from episodes PRESENT in the store, so an evicted episode could
-        # never be legacy, and a procedure whose evidence had all rotted away
-        # left the report entirely — taking its own `refs_missing` count with
-        # it. The headline converged to zero exactly as the credit became LESS
-        # verifiable (measured live: "0 of 34" printed while 70 of 75
-        # references pointed at nothing). A reference that resolves to nothing
-        # is UNEXAMINABLE, not clean.
+        # A reference to an evicted episode is unexaminable, not clean: keep such procedures.
         if not legacy_refs and not missing_refs:
             continue
         if (proc.success_count + proc.failure_count) == 0:
@@ -162,9 +125,7 @@ def build_report(episodes: list[EpisodeRecord], procedures: list[ProcedureRecord
             ("<none>" if e.declared_completion is None else e.declared_completion)
             for e in episodes
         ),
-        # Reported because on a legacy store this — not completion — is what
-        # actually withholds everything: retrieval admits only an explicit
-        # True, and a row written before the field carries no bit at all.
+        # On a legacy store this bit, not completion, withholds rows: only an explicit True admits.
         "usage_eligible": _distribution(
             ("<missing>" if e.usage_eligible is None else str(e.usage_eligible))
             for e in episodes
@@ -266,8 +227,6 @@ def main(argv: list[str] | None = None) -> int:
     procedures = ProceduralMemoryStore(procedural).load()
     print(render(build_report(episodes, procedures)))
 
-    # Self-check rather than a promise: a diagnostic that quietly wrote would
-    # be worse than one that never ran.
     after = (_hash(episodic), _hash(procedural))
     if before != after:
         print("\nERROR: a store changed while reporting — this script must be "

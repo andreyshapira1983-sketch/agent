@@ -1,10 +1,10 @@
-"""Очередь на суд — рабочее место Клода (core/judge_queue.py).
+"""Claude's judge queue (core/judge_queue.py): list pending items, rule on one, show agreement.
 
-    python scripts/judge_queue.py list  [--root DIR]
-    python scripts/judge_queue.py rule  ID confirmed|overturned|unclear "что открыл и что увидел" [--root DIR]
-    python scripts/judge_queue.py stats [--root DIR]
+    python scripts/judge_queue.py [--root DIR] list
+    python scripts/judge_queue.py [--root DIR] rule ID confirmed|overturned|unclear "what you saw"
+    python scripts/judge_queue.py [--root DIR] stats
 
-Команда пишет решения мимо инструментов агента: агенту этот журнал закрыт.
+Rulings are written outside the agent's tools; this journal is closed to the agent.
 """
 from __future__ import annotations
 

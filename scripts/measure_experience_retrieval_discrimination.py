@@ -1,17 +1,7 @@
-"""Различающая сила подбора опыта: что впускается и что доходит до планировщика.
+"""Measure how well experience retrieval admits related procedures and rejects unrelated ones.
 
-MIR-105 оставлен открытым с явной причиной: выбор между «полом» для невиданных
-слов и «порогом» на счёт требует замера КАЧЕСТВА подбора, а не вкуса. Этот
-скрипт даёт замер.
-
-Разметка не на вкус: процедура относится к тому вопросу, из которого её
-отчеканили: сначала независимый след `source_questions` (MIR-165), который
-переживает гигиену, затем — пока он не накопился — живой эпизод по
-`source_episode_ids`. Отрицательный контроль — пары, где вопрос и
-вопрос-происхождение процедуры не делят НИ ОДНОГО значащего слова: настолько
-«не про то», насколько это вообще удостоверяется данными.
-
-Запуск: PYTHONIOENCODING=utf-8 PYTHONPATH=. python scripts/measure_experience_retrieval_discrimination.py
+Run from the repo root:
+PYTHONIOENCODING=utf-8 PYTHONPATH=. python scripts/measure_experience_retrieval_discrimination.py
 """
 from __future__ import annotations
 
@@ -37,7 +27,7 @@ def _content(text: str) -> set[str]:
 
 def _admitted(proc, q_tokens: set[str], q_content: set[str],
               salience: TokenSalience, threshold: float) -> tuple[bool, float]:
-    """Повторяет допуск `ProceduralMemoryStore.search_with_report` один в один."""
+    """Replicate the admission rule of `ProceduralMemoryStore.search_with_report` exactly."""
     if proc.status in RETIRED:
         return False, 0.0
     haystack = " ".join([proc.name, " ".join(proc.trigger_tags), " ".join(proc.steps)])
@@ -71,9 +61,8 @@ def main() -> None:
     print(f"  вес слова, встреченного однажды: {once:.2f} — "
           f"{'НЕОТЛИЧИМ от невиданного' if abs(once - salience.unseen) < 1e-9 else 'отличается'}\n")
 
-    # Положительные пары: вопрос и процедура, отчеканенная ИЗ него. Сначала
-    # независимый след (`source_questions`, MIR-165) — он переживает гигиену;
-    # затем прежний способ через живой эпизод, пока след не накопился.
+    # Positives: a question and the procedure minted from it; `source_questions` first (it
+    # survives hygiene), else the live episode through `source_episode_ids`.
     positives = [
         (question, {p.id})
         for p in procedures
@@ -83,8 +72,8 @@ def main() -> None:
         ])
         if question
     ]
-    # Отрицательные: тот же вопрос против процедур, чей вопрос-происхождение
-    # не делит с ним ни одного значащего слова.
+    # Negatives: the same question against procedures whose origin question shares no content
+    # word with it.
     negatives = []
     for question, _ in positives:
         qc = _content(question)

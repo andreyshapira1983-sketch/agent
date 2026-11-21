@@ -1,22 +1,10 @@
-"""Разовая миграция MIR-058: зачёт без выжившей улики теряет право голоса.
+"""One-off migration: demote active procedures whose evidence episodes are all gone.
 
-КОМУ ЭТО НУЖНО. Ворота MIR-057 остановили НОВЫЙ непроверяемый зачёт, но
-только вперёд; уборка эпизодов о процедурах не знает (MIR-128), поэтому улика
-выносится, а начисленная по ней уверенность её переживает. Живой пик:
-`tools:file_read` — уверенность 0.962, active, 31 опора, все 31 отсутствуют.
+A procedure that is active, has a non-zero success or failure count, and none of whose
+source_episode_ids survive in episodic memory becomes needs_review; counts and
+confidence stay untouched. Dry run by default; --apply writes after a <file>.<ts>.bak copy.
 
-ЧТО ДЕЛАЕТ, на процедуру: если статус `active`, зачёт ненулевой И НИ ОДНОГО
-из `source_episode_ids` больше нет в эпизодическом хранилище — статус
-становится `needs_review`. Фильтр подбора (`search_with_report`) такие не
-подаёт планировщику. Счётчики и уверенность НЕ трогаются: журнал «было
-начислено» честен; переписывать его значило бы выдумывать вердикт руками.
-Обратимо: проверяемые завершения возвращают active обычным жизненным циклом.
-
-БЕЗОПАСНОСТЬ. Dry-run по умолчанию; `--apply` пишет. Перед записью — копия
-в семье имён `<file>.<ts>.bak`, которую узнаёт метла MIR-125 (закон
-keep_last=3 хранит новейшие). Запуск:
-    python scripts/demote_unverifiable_procedure_standing.py            # отчёт
-    python scripts/demote_unverifiable_procedure_standing.py --apply    # запись
+Run: python scripts/demote_unverifiable_procedure_standing.py [--apply] [--workspace DIR]
 """
 from __future__ import annotations
 
@@ -42,7 +30,7 @@ def select_and_demote(
     *,
     apply: bool,
 ) -> dict:
-    """Отобрать и (при apply) перевести; отчёт в обоих режимах одинаков."""
+    """Select and, with apply, demote unverifiable procedures; same report shape either way."""
     alive_ids = {ep.id for ep in estore.load()}
 
     def _unverifiable(proc) -> bool:
@@ -61,8 +49,7 @@ def select_and_demote(
             "applied": False,
         }
 
-    # Отбор и запись под ОДНИМ замком хранилища: список, прочитанный раньше,
-    # стёр бы зачёт, начисленный в промежутке (проверка 17.11, средняя).
+    # Select and write under one store lock: a list read earlier would lose credit added since.
     seen: dict = {"scanned": 0, "demoted": []}
 
     def _demote(procedures: list) -> list:

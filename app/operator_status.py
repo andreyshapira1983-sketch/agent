@@ -177,15 +177,14 @@ def _handle_operator_budget(rest: str, agent: AgentLoop, workspace: Path) -> boo
         print(json.dumps(budget_payload, ensure_ascii=False, indent=2), file=sys.stderr)
     else:
         print(_format_operator_budget_digest(budget_payload), file=sys.stderr)
-        # Зеркало трат (MIR-177): пары «потратил → получил» из живых журналов,
-        # всегда со знаменателем. Не совет — материал для вывода.
+        # Spend mirror: "spent -> got" pairs from the live journals, always with the denominator.
         for line in _spend_mirror_lines(workspace):
             print(line, file=sys.stderr)
     return True
 
 
 def _spend_mirror_lines(workspace: Path) -> list[str]:
-    """Тонкий вызов: загрузка и свод живут в `core/spend_report` (MIR-177)."""
+    """Spend mirror lines; loading and summing live in core.spend_report."""
     from core.spend_report import load_spend_rows, spend_report_lines
 
     usage, ledger = load_spend_rows(workspace)
@@ -300,11 +299,8 @@ def _handle_autonomy_readiness(rest: str, agent: AgentLoop, workspace: Path) -> 
 
 
 # -- conversational capability / readiness reports ----------------------------
-# Extracted verbatim from main.py. These answer plain-language operator
-# questions ("what can you do", "are you ready to code", "what are your gaps",
-# "find your weaknesses", "what is the next safe test") and are reached through
-# the operator-intent bridge rather than as :commands -- except
-# :coding-readiness, which has both entry points.
+# Reached through the operator-intent bridge, not as :commands; only
+# :coding-readiness has both entry points.
 
 
 def _handle_operator_capability_check(agent: AgentLoop, workspace: Path) -> bool:

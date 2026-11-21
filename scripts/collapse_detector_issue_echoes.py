@@ -1,25 +1,8 @@
-"""One-time migration: the self-improvement registry stops being a monoculture.
+"""One-time migration: collapse detector-echo rows in data/self_improvement_issues.jsonl.
 
-WHO NEEDS THIS. The 2026-08-22 identity fix (`core/self_improvement_issues.py`)
-keys detector-minted issues by SIGNAL CLASS and stops minting from the
-unreliable sensor family — but it is forward-only, and the live registry holds
-the 106 rows the old identity minted: every one `open`, the largest families
-one detector pair echoing different campaign questions. This script replays
-the CURRENT rules over the standing rows, the `completion_backfill` principle:
-never invent a verdict by hand.
-
-WHAT IT DOES, per row:
-
-* re-derives the failure identity from `related_error_text` via the current
-  `failure_fingerprint`;
-* rows whose text is a detector firing with NO reliable signal left
-  (`reasoning_action_mismatch` / `user_contract_unrepresented` solo) are
-  dropped — under the current rules they would never have been minted;
-* rows that now share a fingerprint merge: earliest `first_seen`, latest
-  `last_seen`, evidence united (newest 8), status `open` if any member is
-  open (a merge must not silently resolve anything).
-
-Dry-run by default; `--apply` writes after a timestamped backup.
+Replays the current rules: drops rows minted only by unreliable detector signals and
+merges rows that now share a failure fingerprint (the merged row stays open if any was).
+Dry run by default; --apply writes after a timestamped backup; --workspace sets the root.
 """
 from __future__ import annotations
 
@@ -71,9 +54,8 @@ def main(argv: list[str] | None = None) -> int:
             if not reliable:
                 dropped_unreliable += 1
                 continue
-            # Normalise to the text the CURRENT writer would produce: reliable
-            # signals only. Otherwise an old mixed-list row never merges with a
-            # new clean-list row of the same class.
+            # Rewrite to the current writer's text (reliable signals only) so an old
+            # mixed-signal row merges with a new row of the same class.
             rest = text.split(":", 1)[1] if ":" in text else ""
             text = f"detectors {', '.join(reliable)}:{rest}"
         fp = failure_fingerprint(text) if text else issue.fingerprint

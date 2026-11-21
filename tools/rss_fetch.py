@@ -1,11 +1,4 @@
-"""RSS / Atom fetch tool.
-
-RSS is a good no-key source for autonomous agents: cheap, structured, and
-schedule-friendly. The tool is read-only and follows the same network safety
-shape as `web_fetch`: HTTPS by default, plain HTTP only by explicit host
-allowlist, ASCII URL, DNS/IP/redirect checks, egress allow/deny policy,
-post-gzip size cap, timeout, and redaction before output.
-"""
+"""RSS / Atom fetch tool. Read-only, under the same network safety policy as web_fetch."""
 from __future__ import annotations
 
 import hashlib
@@ -73,7 +66,7 @@ class RssFetchTool(Tool):
             raise ValueError(f"timeout_seconds must be > 0, got {timeout_seconds}")
         self.max_bytes = int(max_bytes)
         self.timeout_seconds = float(timeout_seconds)
-        #: Persistent `web_fetches` meter (block 7, W3); None = unmetered.
+        #: Persistent `web_fetches` meter; None = unmetered.
         self.budget_ledger = budget_ledger
         self._opener = opener
         self._network_policy = NetworkSafetyPolicy(
@@ -217,14 +210,6 @@ class RssFetchTool(Tool):
                 warnings.append(f"entry[{idx}] has neither title nor url")
         return True, warnings
 
-    # F-7 (docs/audit/FIELD_CHECK_QUEUE.md), 2026-08-25: та же пара мёртвых
-    # дубликатов, что и в `web_fetch` — буквально скопированная. Ни вызова, ни
-    # ссылки, ни теста; политику собирали свою, отличную от
-    # `self._network_policy` из `__init__`. Живой путь проверяет URL дважды: до
-    # запроса и ПОВТОРНО после перенаправления. Опасность была в том, что
-    # следующий читатель позвал бы дубликат как живую проверку и получил другие
-    # настройки.
-
     @staticmethod
     def _check_content_type(content_type: str) -> None:
         ct_lower = (content_type or "").split(";", 1)[0].strip().lower()
@@ -248,12 +233,7 @@ class RssFetchTool(Tool):
 
 
 def _prolog_declares_a_dtd(text: str) -> bool:
-    """True when the XML prolog carries a DTD or an entity declaration.
-
-    Only the prolog is examined — everything before the root element, skipping
-    processing instructions and comments — so the same characters inside a
-    text node or CDATA are not mistaken for a declaration.
-    """
+    """True when the XML prolog (before the root element) declares a DTD or an entity."""
     i = 0
     n = len(text)
     while i < n:
@@ -279,10 +259,7 @@ def _prolog_declares_a_dtd(text: str) -> bool:
 
 
 def _parse_feed(text: str, *, limit: int) -> tuple[str, str, list[dict[str, str]]]:
-    # The feed comes off someone else's server. ElementTree resolves no
-    # external entities but does expand internal ones, which is all that
-    # billion-laughs and quadratic blowup need. RSS and Atom have no use for
-    # a DTD, so the declaration itself is the refusal.
+    # ElementTree expands internal entities (billion laughs); feeds need no DTD, so one is refused.
     if _prolog_declares_a_dtd(text):
         raise ValueError("feed declares a DTD or entity — refused before parsing")
     try:

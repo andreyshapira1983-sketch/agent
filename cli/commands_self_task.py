@@ -1,11 +1,4 @@
-"""``:self-task-propose`` REPL command (roadmap Stage 1, Stage A).
-
-It NEVER writes implementation code and NEVER applies anything. The human
-reads the proposed test, approves the task with ``:approval-approve``, then
-triggers the implementation with ``:self-task-build`` (Stage B). Both
-applied steps stay behind human-in-the-loop approval and the existing self-
-apply lane.
-"""
+"""``:self-task-propose`` / ``:self-task-build``: coding tasks behind human approval."""
 from __future__ import annotations
 
 import sys
@@ -25,7 +18,6 @@ if TYPE_CHECKING:
 
 
 def _handle_self_task_propose(rest: str, agent: AgentLoop, workspace: Path) -> bool:
-    # Narrow trigger: no arguments. Anything extra is a misuse.
     if rest.strip():
         print(
             "Usage: :self-task-propose\n"
@@ -60,7 +52,6 @@ def _handle_self_task_propose(rest: str, agent: AgentLoop, workspace: Path) -> b
         },
     )
 
-    # Journal the attempt into episodic memory so the agent accumulates lessons.
     record_self_build_episode(agent, kind="self-task-produce", result=result)
 
     lines = [
@@ -82,9 +73,8 @@ def _handle_self_task_propose(rest: str, agent: AgentLoop, workspace: Path) -> b
     lines.append(f"next: {result.get('next_human_action')}")
     print("\n".join(lines), file=sys.stderr)
 
-    # Show the FULL proposed acceptance test so the human can read the yardstick
-    # BEFORE approving it (the Stage-A anti-cheating guarantee). We decode the
-    # exact, redaction-inert copy so example PII in fixtures is shown verbatim.
+    # Show the full proposed test before approval (anti-cheating guarantee); decode the
+    # redaction-inert copy so fixture examples are shown verbatim.
     approval_id = result.get("approval_id")
     if approval_id:
         item = next((i for i in inbox.list() if i.id == approval_id), None)
@@ -101,7 +91,6 @@ def _handle_self_task_propose(rest: str, agent: AgentLoop, workspace: Path) -> b
 
 
 def _handle_self_task_build(rest: str, agent: AgentLoop, workspace: Path) -> bool:
-    # Requires exactly one argument: the approved coding-task approval id.
     approval_id = rest.strip()
     if not approval_id or len(approval_id.split()) != 1:
         print(
@@ -138,7 +127,6 @@ def _handle_self_task_build(rest: str, agent: AgentLoop, workspace: Path) -> boo
         },
     )
 
-    # Journal the attempt into episodic memory so the agent accumulates lessons.
     record_self_build_episode(agent, kind="self-task-build", result=result)
 
     lines = [

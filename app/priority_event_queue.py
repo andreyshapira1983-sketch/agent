@@ -1,11 +1,4 @@
-"""In-memory priority event queue for the daemon dispatcher (plan item 3.1).
-
-Deduplication ------------- An optional non-empty ``dedup_key`` suppresses
-another event with the same key only while the first event is waiting in
-this queue. The first event is returned unchanged; its key is released as
-soon as it is popped. Unkeyed events are never deduplicated. This state is
-intentionally in-memory and has no TTL or recovery.
-"""
+"""In-memory priority event queue for the daemon dispatcher (aging, dedup of queued events)."""
 from __future__ import annotations
 
 import asyncio
@@ -21,8 +14,7 @@ from core.ids import new_id
 
 logger = logging.getLogger(__name__)
 
-# Default: after this many consecutive higher-priority pops, prefer one
-# waiting background event if present.
+# After this many higher-priority pops in a row, one waiting BACKGROUND event is served.
 DEFAULT_AGING_AFTER = 8
 
 
@@ -156,11 +148,7 @@ class PriorityEventQueue:
         event_id: str | None = None,
         dedup_key: str | None = None,
     ) -> DaemonEvent:
-        """Enqueue or return the pending event with the same ``dedup_key``.
-
-        Raises :class:`PriorityEventQueueClosed` if closed. A duplicate does
-        not mutate the queue, sequence, original event, or ``on_put`` callback.
-        """
+        """Enqueue an event, or return the still-queued event with the same dedup_key unchanged."""
         if self._closed:
             raise PriorityEventQueueClosed("priority event queue is closed")
         kind_s = str(kind or "").strip()
@@ -216,10 +204,7 @@ class PriorityEventQueue:
         return out
 
     async def get(self) -> DaemonEvent:
-        """Wait until an event is available, then pop it.
-
-        If the queue is closed and empty, raises :class:`PriorityEventQueueClosed`.
-        """
+        """Wait for an event and pop it; raise PriorityEventQueueClosed once closed and empty."""
         while True:
             event = self._pop_next()
             if event is not None:

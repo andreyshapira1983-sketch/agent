@@ -1,17 +1,4 @@
-"""``:value-review`` / ``:value-review-list`` REPL commands (TD-032).
-
-A human records whether an *applied* self-build proposal was actually valuable,
-separate from the technical lane outcome. Strictly capture-only:
-
-* Reads the approval inbox to validate eligibility; never mutates an item.
-* Writes only ``data/value_reviews.jsonl`` via :class:`core.value_review.ValueReviewLog`.
-* Runs no producer, no self-apply lane, no tests, no LLM, no network, no git.
-
-Eligible items (all must hold, else a clear error and *nothing is written*):
-    status    == "executed"
-    operation == "self_apply_lane.run"
-    payload.origin == subagent_self_build_producer
-"""
+"""``:value-review`` commands: a human's verdict on whether an applied proposal was valuable."""
 from __future__ import annotations
 
 import sys
@@ -65,7 +52,6 @@ def _handle_value_review(rest: str, agent: AgentLoop, workspace: Path) -> bool:
     item_id, verdict = parts[0], parts[1]
     note = parts[2] if len(parts) == 3 else ""
 
-    # Validate the verdict before touching anything else; write nothing on error.
     if verdict not in VALID_VERDICTS:
         print(
             f"(value-review rejected: invalid verdict {verdict!r}; expected one of "
@@ -92,8 +78,7 @@ def _handle_value_review(rest: str, agent: AgentLoop, workspace: Path) -> bool:
         "value_review_recorded",
         {"item_id": review.item_id, "verdict": review.verdict},
     )
-    # TD-033: best-effort project the latest verdicts onto subagent scoring.
-    # Guarded so a registry read/write failure never breaks value-review capture.
+    # Best effort: project the latest verdicts onto subagent scoring.
     try:
         from core.subagent_registry import SubagentRegistry
 

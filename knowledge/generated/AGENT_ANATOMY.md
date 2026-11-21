@@ -411,32 +411,32 @@ Exams judge from outside the agent: the nightly anchor exam and the work exam ch
 
 | Tool module | Purpose |
 | ----------- | ------- |
-| `tools/agent_mcp_server` | MCP transport for the read-only agent view. |
-| `tools/agent_state_view` | Read-only view of this agent's own state, for whoever is watching it. |
-| `tools/base` | Tool abstraction and registry. |
-| `tools/convert_file` | `convert_file` — программы для файлов клиента, запущенные безопасно. |
+| `tools/agent_mcp_server` | Read-only MCP server over tools/agent_state_view.py (needs ``pip install mcp``). |
+| `tools/agent_state_view` | Read-only view of the agent's own state; no `mcp` import (transport: agent_mcp_server.py). |
+| `tools/base` | Tool abstraction (a callable unit with a risk label) and the name-to-tool registry. |
+| `tools/convert_file` | convert_file tool: run fixed file-conversion programs on a workspace file in a sandbox. |
 | `tools/current_time` | Current Time tool — pure read-only clock query. |
-| `tools/diff_file` | MVP-13.1 — `diff_file` tool: unified diff vs proposed content. |
+| `tools/diff_file` | ``diff_file`` tool: read-only unified diff of a workspace file against proposed content. |
 | `tools/file_read` | File Read tool — sandboxed to the workspace root. |
-| `tools/file_write` | File Write tool — sandboxed, secret-aware, backup-on-overwrite. |
-| `tools/find_in_files` | Find in Files — поиск по рабочей папке: файлы по имени и строки по тексту. |
-| `tools/journal_append` |  |
-| `tools/json_view` | Компактный вид JSON-ответа: факты не тонут в длинных полях. |
+| `tools/file_write` | file_write tool: write a UTF-8 file inside the workspace; overwrites keep a backup. |
+| `tools/find_in_files` | Read-only workspace search: files by name, lines by text; credential files are never read. |
+| `tools/journal_append` | journal_append tool: append one checked JSON record to a data/*.jsonl journal. |
+| `tools/json_view` | Compact view of a JSON response, so short facts are not buried behind long fields. |
 | `tools/lesson_provenance_tool` | The provenance meter in the planner's hands (read-only). |
-| `tools/list_dir` | List Directory tool — sandboxed to the workspace root. |
+| `tools/list_dir` | ``list_dir`` tool: list a workspace directory; refuses paths outside it and non-directories. |
 | `tools/memory_bank` |  |
-| `tools/memory_recall` | The agent's own read door into durable memory: a bounded, low-trust search. |
+| `tools/memory_recall` | ``memory_recall`` tool: bounded, low-trust, read-only search of the agent's durable memory. |
 | `tools/model_roster` | `model_roster` — the agent asks what models it has. |
-| `tools/model_route` | The agent's door to his own routing policy: set or release a role's model. |
+| `tools/model_route` | model_route tool: the agent sets or releases the model for one of its roles. |
 | `tools/network_safety` | Network safety helpers for read-only HTTP tools. |
-| `tools/patch_check` | `patch_check` — проверить свою правку в отдельной копии, не трогая живой код. |
-| `tools/python_probe` | Python Probe — лаборатория: маленький эксперимент над СВОЕЙ средой. |
-| `tools/read_logs` | MVP-13.1 — `read_logs` tool: structured JSONL audit reader. |
-| `tools/reddit_feed` | Reddit читается через свою ленту `.rss`, а не через страницу. |
+| `tools/patch_check` | Try a patch in a throwaway copy of the repo with ruff and pytest; live code stays untouched. |
+| `tools/python_probe` | Python Probe — a lab: a small experiment that measures the agent's own runtime. |
+| `tools/read_logs` | `read_logs` tool: bounded, redacted reader of the agent's own JSONL audit logs. |
+| `tools/reddit_feed` | Read Reddit through its `.rss` feed: pages are script-built and `.json` is refused (403). |
 | `tools/rss_fetch` | RSS / Atom fetch tool. |
-| `tools/run_tests` | MVP-13.1 — `run_tests` tool: sandboxed pytest runner. |
-| `tools/semantic_scholar_search` | Semantic Scholar Academic Search tool. |
-| `tools/shell_exec` | Shell Exec tool — narrow, sandboxed, with mandatory compensation plan. |
-| `tools/spawn_subagent` | spawn_subagent tool — agent-as-tool pattern for parallel sub-task delegation. |
-| `tools/web_fetch` | MVP-14.2 — `web_fetch` tool: turn a web pointer into a verifiable source. |
+| `tools/run_tests` | run_tests tool: run pytest in the workspace and return structured results. |
+| `tools/semantic_scholar_search` | `semantic_scholar_search` tool: papers from the Semantic Scholar API, DuckDuckGo fallback. |
+| `tools/shell_exec` | `shell_exec` tool: one whitelisted command, sandboxed, with a compensation plan built first. |
+| `tools/spawn_subagent` | spawn_subagent tool: delegate one independent sub-task to a bounded, read-only child agent. |
+| `tools/web_fetch` | `web_fetch` tool: turn a web pointer (a search hit) into a verifiable, hashed source. |
 | `tools/web_search` | Web Search tool — read-only, no API key (DuckDuckGo via ddgs). |

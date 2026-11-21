@@ -1,36 +1,4 @@
-"""Async file watcher for daemon event sources (plan item 2.2).
-
-This is the second event source for the continuous-service mode (after the
-in-loop timer scheduler, 2.1). It watches a set of files and/or directories —
-typically the approval inbox and applicable config files — and wakes the daemon
-loop when they change, so a human dropping an approval or editing config does not
-have to wait for the next scheduler tick.
-
-Design choices
---------------
-- **No heavy dependency.** Rather than pulling in ``watchdog`` (a native,
-  platform-specific dependency that would need justification and lock-file
-  churn), this uses a lightweight *stat snapshot* diff on a cooperative poll.
-  Each poll is a cheap ``stat`` of a small, known set of paths and yields the
-  event loop between polls, so it never blocks the loop and never busy-spins.
-- **Debounced / coalesced.** A burst of rapid writes (e.g. an editor saving a
-  config repeatedly, or several inbox appends) is collapsed into a single
-  batch: the watcher only emits once the watched set has been quiet for a
-  bounded ``debounce`` window.
-- **Survives a missing directory.** A watched path that does not exist yet is
-  simply treated as empty; when it appears the entries are reported as created.
-  A path that vanishes mid-scan is treated as absent, never as an error.
-- **No self-echo.** The watcher only ever *reads* (``stat``); it never writes to
-  the paths it watches, so it cannot trigger itself. Unchanged files produce no
-  event because their signature is identical across polls.
-- **Injectable time.** ``now`` and ``sleep`` are injectable so tests drive many
-  simulated seconds in milliseconds with a fake clock instead of real sleeps.
-
-Time is fully injectable and the watcher cooperates with the daemon loop
-(1.1/1.2) rather than owning it: a caller ``spawn``s :meth:`run` as a task and
-``stop`` / cancels it during graceful shutdown. ``agent_tick.py`` is untouched
-and does not import this module.
-"""
+"""Async stat-polling file watcher that wakes the daemon loop when watched paths change."""
 from __future__ import annotations
 
 import asyncio
@@ -49,11 +17,10 @@ SleepFn = Callable[[float], Awaitable[None]]
 ChangeKind = Literal["created", "modified", "deleted"]
 ChangeCallback = Callable[["list[FileChange]"], "Awaitable[None] | None"]
 
-# Default cadence between snapshot scans. Small enough to feel responsive,
-# large enough that the periodic ``stat`` of a handful of paths is negligible.
+# Seconds between snapshot scans.
 DEFAULT_POLL_INTERVAL = 1.0
 
-# Default quiet window a change burst must settle for before a batch is emitted.
+# Seconds a change burst must stay quiet before its batch is emitted.
 DEFAULT_DEBOUNCE = 0.3
 
 
@@ -79,24 +46,12 @@ _Snapshot = "dict[Path, tuple[int, int]]"
 class FileWatcher:
     """Watch files/directories and emit coalesced change batches.
 
-    Parameters ---------- paths: Files and/or directories to watch.
-    Directory targets contribute their direct child files (optionally
-    recursively). Non-existent targets are allowed and simply contribute
-    nothing until they appear. on_change: Optional callback (sync or async)
-    invoked with a non-empty list of :class:`FileChange` whenever a settled
-    batch is detected. This is the hook the daemon loop uses to ``wake`` its
-    dispatcher. Callback errors are logged and never kill the watcher.
-    patterns: Optional iterable of ``fnmatch`` glob patterns (matched
-    against each file's name). When given, only matching files are watched.
-    now / sleep: Injectable clock and awaitable sleep (default UTC
-    ``datetime.now`` and :func:`asyncio.sleep`), so tests use a controllable
-    clock. poll_interval: Seconds between snapshot scans. Must be > 0.
-    debounce: Quiet window (seconds, >= 0) a change burst must settle for
-    before the batch is emitted, coalescing rapid repeated writes.
-    recursive: Whether directory targets are scanned recursively. Defaults
-    to False. emit_existing: Whether files already present at startup are
-    reported as ``created`` on the first settled batch. Defaults to False
-    (baseline is silent).
+    Args:
+        paths: files and/or directories; a directory contributes its child files,
+            a missing target contributes nothing until it appears.
+        on_change: sync or async callback for each settled batch; its errors are logged.
+        patterns: fnmatch globs matched against file names.
+        emit_existing: report files present at startup as ``created``.
     """
 
     def __init__(
@@ -136,8 +91,7 @@ class FileWatcher:
         self._batches = 0
         self._changes = 0
         if emit_existing:
-            # Leave the baseline empty so the first scan reports existing files
-            # as created.
+            # An empty baseline makes the first scan report existing files as created.
             self._snapshot = {}
             self._baseline_taken = True
         else:
@@ -193,12 +147,7 @@ class FileWatcher:
         return (st.st_mtime_ns, st.st_size)
 
     def scan(self) -> dict[Path, tuple[int, int]]:
-        """Return the current signature snapshot of all watched files.
-
-        A path that raises while being read (e.g. it vanished between listing
-        and ``stat``) is simply omitted, so a transient race never surfaces as
-        an error — it shows up as a delete/create on a later poll instead.
-        """
+        """Return the (mtime_ns, size) snapshot of watched files; unreadable paths are omitted."""
         out: dict[Path, tuple[int, int]] = {}
         for target in self._paths:
             try:
@@ -252,13 +201,7 @@ class FileWatcher:
     # ── main loop ────────────────────────────────────────────────────────
 
     async def run(self) -> None:
-        """Run until :meth:`stop` is called or the task is cancelled.
-
-        Each poll takes a fresh snapshot and diffs it against the last. New
-        changes reset a quiet timer; a batch is only emitted once no further
-        change has appeared for ``debounce`` seconds, coalescing bursts.
-        Cancellation propagates so the daemon's graceful shutdown can cancel it.
-        """
+        """Poll and emit debounced change batches until :meth:`stop` or cancellation."""
         if self._running:
             raise RuntimeError("FileWatcher is already running")
         self._running = True
@@ -285,7 +228,6 @@ class FileWatcher:
                     continue
                 if self._pending and self._debounce_elapsed():
                     await self._flush()
-            # Emit whatever settled work remains before exiting cleanly.
             if self._pending:
                 await self._flush()
         except asyncio.CancelledError:
@@ -318,12 +260,7 @@ class FileWatcher:
         await self._emit(batch)
 
     async def _sleep_or_wake(self, delay: float) -> bool:
-        """Sleep up to ``delay`` seconds or until notified/stopped.
-
-        Returns True if woken early (by :meth:`notify` / :meth:`stop`) rather
-        than by the sleep elapsing. Pending child futures are always cancelled
-        and awaited so nothing is left dangling, including on cancellation.
-        """
+        """Sleep up to ``delay`` seconds or until notified/stopped; return True if woken early."""
         if self._stopped or self._wake_event.is_set():
             self._wake_event.clear()
             return True

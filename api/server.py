@@ -1,37 +1,4 @@
-"""FastAPI HTTP server — production deployment entry point.
-
-Exposes the agent as a JSON API so external tools, dashboards, and
-test harnesses can drive it without a CLI session.
-
-Usage:
-    # Install deps (one-time):
-    pip install fastapi uvicorn
-
-    # Run:
-    uvicorn api.server:app --host 0.0.0.0 --port 8000
-
-    # Or from the workspace root with auto-reload for development:
-    uvicorn api.server:app --reload
-
-Endpoints:
-    POST /ask       — run one agent cycle and return the answer
-    GET  /health    — liveness check
-    GET  /usage     — cumulative LLM token usage since server start
-
-Authentication:
-    Bearer token via the ``Authorization`` header.
-    Set AGENT_API_TOKEN in your environment (or .env file).
-    Requests without a matching token receive HTTP 401.
-    If AGENT_API_TOKEN is unset the server refuses to start —
-    running an unauthenticated agent API on a network interface is
-    a security risk.
-
-Security posture:
-    * Auth is checked before any agent logic runs.
-    * The question and file_hint are length-bounded at the HTTP layer.
-    * Answers are returned as plain JSON strings (no HTML rendering).
-    * Trace IDs are included in every response for log correlation.
-"""
+"""FastAPI server exposing the agent as a bearer-token JSON API (uvicorn api.server:app)."""
 from __future__ import annotations
 
 import os
@@ -44,9 +11,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ---------------------------------------------------------------------------
-# Optional FastAPI import — give a clear error if not installed
-# ---------------------------------------------------------------------------
 try:
     from fastapi import Depends, FastAPI, HTTPException, status
     from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -57,10 +21,6 @@ except ImportError as _e:
         "Install it with: pip install fastapi uvicorn"
     ) from _e
 
-
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
 
 _API_TOKEN = os.getenv("AGENT_API_TOKEN", "").strip()
 if not _API_TOKEN:
@@ -74,28 +34,19 @@ _MAX_FILE_HINT_CHARS = int(os.getenv("AGENT_API_MAX_FILE_HINT", "512"))
 _WORKSPACE = Path(os.getenv("AGENT_WORKSPACE", ".")).resolve()
 
 
-# ---------------------------------------------------------------------------
-# Agent singleton (one shared instance, persistent working memory)
-# ---------------------------------------------------------------------------
-
 def _build_server_agent():
     """Build an AgentLoop configured for server use (no interactive approvals)."""
     from app.bootstrap import build_agent  # lazy to avoid top-level side effects
     return build_agent(_WORKSPACE, with_memory=True, approval_provider=None)
 
 
-_agent = None  # initialised on first request (lazy startup)
+_agent = None  # one shared agent, built on the first request
 
-# Guards lazy construction so a first burst of concurrent requests can't build
-# two agents and leak one.
+# Concurrent first requests must not build two agents.
 _agent_lock = threading.Lock()
 
-# Serializes agent.run() across requests. FastAPI runs sync endpoints in a
-# thread pool, so without this two concurrent /ask calls would drive the SAME
-# AgentLoop at once — interleaving its single TraceLogger (one trace_id),
-# WorkingMemory turns, and ModelUsageLedger writes. The agent is intentionally
-# one shared instance with cross-request session memory (see /ask docstring),
-# so the correct fix is to serialize access rather than shard per request.
+# FastAPI runs sync endpoints in a thread pool; the shared AgentLoop (one trace
+# logger, working memory, usage ledger) must run one request at a time.
 _run_lock = threading.Lock()
 
 
@@ -108,10 +59,6 @@ def _get_agent():
                 _agent = _build_server_agent()
     return _agent
 
-
-# ---------------------------------------------------------------------------
-# FastAPI app
-# ---------------------------------------------------------------------------
 
 app = FastAPI(
     title="Agent API",
@@ -133,10 +80,6 @@ def _require_auth(credentials: HTTPAuthorizationCredentials = Depends(_bearer)) 
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-
-# ---------------------------------------------------------------------------
-# Request / response models
-# ---------------------------------------------------------------------------
 
 class AskRequest(BaseModel):
     question: str = Field(
@@ -170,10 +113,6 @@ class UsageResponse(BaseModel):
     total_tokens: int
 
 
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
-
 @app.get("/health", response_model=HealthResponse, tags=["ops"])
 def health() -> HealthResponse:
     """Liveness check — returns 200 OK when the server is running."""
@@ -194,8 +133,7 @@ def usage() -> UsageResponse:
 def ask(body: AskRequest) -> AskResponse:
     """Run one agent cycle and return the answer."""
     agent = _get_agent()
-    # Serialize the whole run + response read: concurrent /ask calls must not
-    # interleave the shared agent's TraceLogger / WorkingMemory / usage ledger.
+    # The response read stays under the lock: trace_id and usage belong to this run.
     with _run_lock:
         try:
             answer = agent.run(
@@ -203,8 +141,7 @@ def ask(body: AskRequest) -> AskResponse:
                 file_hint=body.file_hint,
             )
         except Exception as exc:
-            # Surface unexpected errors as 500 with a safe message (no stack
-            # trace in the response body — full trace is in the JSONL log).
+            # A 500 without a stack trace in the body; the full error goes to the JSONL log.
             agent.log.log("api_error", {"error": type(exc).__name__, "message": str(exc)})
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

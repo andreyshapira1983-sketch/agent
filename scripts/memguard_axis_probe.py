@@ -1,12 +1,4 @@
-"""Какую власть сохраняет проверяющий сигнал ПОСЛЕ допуска в память.
-
-Ось MemGuard (2026-08-26). Вопрос не «допускать ли неподтверждённое», а
-«различает ли выдача подтверждённое и неподтверждённое». Замер печатает три
-числа: сколько записей допущено меткой в обход сигнала, сколько подтверждённых
-записей НЕ имеют защитной метки, и кто из них кого обгоняет в живой выдаче.
-
-Запуск: PYTHONIOENCODING=utf-8 python scripts/memguard_axis_probe.py
-"""
+"""Probe: does memory retrieval still rank verified episodes above tag-boosted unverified ones?"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -34,9 +26,8 @@ def main() -> None:
     print(f"    и при этом несут защитную метку (+50): {len(boosted_unverified)}")
     print(f"подтверждённых БЕЗ защитной метки (буст 0): {len(plain_verified)}")
 
-    # Очная ставка: берём подтверждённую запись без метки и спрашиваем память
-    # её же собственными словами. Если сверху окажется неподтверждённая —
-    # сигнал проиграл метке не гипотетически, а на живом хранилище.
+    # Query with an untagged verified episode's own words; an unverified winner on top means
+    # the tag beat the verification signal on the live store.
     losses = 0
     checked = 0
     for ep in plain_verified:

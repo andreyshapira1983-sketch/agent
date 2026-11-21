@@ -1,25 +1,4 @@
-"""Read-only guard: the command registry and knowledge/maps/COMMANDS_MAP.md
-must agree.
-
-``knowledge/maps/COMMANDS_MAP.md`` claims to be the authoritative map of the
-real operator command surface ("if a command is not here, it does not
-exist"). This guard holds it to that claim by comparing it against
-``cli/command_registry.py`` in **both** directions: every command in the
-registry must be documented, and the document must not list a command the
-registry does not have.
-
-Contract / non-goals -------------------- - Only the first column of the
-``COMMANDS_MAP`` tables is read — the backticked signature cell. Command
-names mentioned in prose are not treated as documentation (the older whole-
-file scan wrongly picked up ``:command`` and ``:commands`` from an example).
-- An escaped pipe separates aliases in that cell, but a usage sketch such as
-``[on\\|off\\|status]`` uses the same escape, so a part only starts a new
-alias when it begins with a real token. - ``?`` is documented as an alias of
-``:help`` but lives outside the ``:token`` namespace; the registry models it
-separately and it is skipped here. - Pure read-only: it reads two files and
-imports one pure-data module. No runtime import, no shell-out, no network
-access.
-"""
+"""Read-only check that the command registry and knowledge/maps/COMMANDS_MAP.md agree both ways."""
 from __future__ import annotations
 
 import os
@@ -50,7 +29,11 @@ def dispatched_commands(source: str) -> set[str]:
 
 
 def documented_commands(doc: str) -> set[str]:
-    """Tokens declared in the signature cell of a ``COMMANDS_MAP`` table row."""
+    """Tokens declared in the signature cell of a ``COMMANDS_MAP`` table row.
+
+    Prose mentions do not count. A part after an escaped pipe is an alias only if it
+    starts with a real token (usage sketches reuse that escape); ``?`` is skipped.
+    """
     documented: set[str] = set()
     for raw in doc.splitlines():
         if not raw.startswith("| `:"):

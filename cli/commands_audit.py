@@ -1,4 +1,4 @@
-"""Команды оператора для аудитов: архитектура, поставки, хранилище, релиз."""
+"""Operator audit commands: architecture, supply chain, state store, release."""
 from __future__ import annotations
 
 import json
@@ -12,7 +12,7 @@ from core.release_hygiene import build_release_manifest
 from core.state_store_drill import run_state_store_drill
 from core.supply_chain import audit_supply_chain
 
-if TYPE_CHECKING:  # pragma: no cover — только для подписи
+if TYPE_CHECKING:  # pragma: no cover — for annotations only
     from core.loop import AgentLoop
 
 

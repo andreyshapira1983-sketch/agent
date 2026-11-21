@@ -1,11 +1,4 @@
-"""Command metadata primitives and the first half of the command table.
-
-Its contract: no runtime-layer imports (``core``/``app``/...) and no side
-effects at import time — declarations only (a frozen dataclass and specs)
-and is combined with :mod:`cli.command_specs_ops` by
-:mod:`cli.command_registry`, which remains the single public entry point --
-see that module's docstring for the full purity contract and field meanings.
-"""
+"""Command metadata primitives and the first half of the command table; declarations only."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -14,6 +7,8 @@ ONE_SHOT = "one_shot"
 REPL = "repl"
 BOTH_MODES = (ONE_SHOT, REPL)
 
+# pre_dotenv: in one-shot mode the command runs before load_dotenv() and before any agent
+# is built; the REPL treats both phases alike.
 PHASE_PRE_DOTENV = "pre_dotenv"
 PHASE_POST_AGENT = "post_agent"
 
@@ -336,10 +331,7 @@ COMMANDS_CORE: tuple[CommandSpec, ...] = (
         category="Models & budget",
         handler_key="refresh_models",
         aliases=(":model-catalog-refresh", ":model-refresh",),
-        # 2026-08-13: в баннер, рядом с читающей половиной пары. Баннер
-        # рекламировал `:provider-catalog-refresh`, пряча команду, которая
-        # единственная умеет записать каталог, — оператор набрал видимую и
-        # получил отказ, каталог остался протухшим (R7).
+        # In the banner next to its read-only pair: the only command that writes the catalog.
         in_startup_summary=True,
     ),
     CommandSpec(

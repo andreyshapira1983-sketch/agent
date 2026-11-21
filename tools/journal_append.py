@@ -1,3 +1,4 @@
+"""journal_append tool: append one checked JSON record to a data/*.jsonl journal."""
 import datetime as _dt
 import re
 from pathlib import Path
@@ -9,18 +10,7 @@ from core.state_integrity import (
 )
 from tools.base import Tool
 
-#: Журналы, у которых ЕСТЬ читатель, и что этот читатель требует от записи.
-#:
-#: Живой вечер 2026-09-20/21, четыре случая подряд одной формы. Агент писал
-#: верное содержание в склад, которого никто не открывает: сначала в
-#: `source_registry.jsonl` («там же про источники»), потом в им же созданный
-#: `defect_registry.jsonl`, потом в им же созданный `judgements.jsonl`, потом
-#: снова в `defect_registry.jsonl` — и каждый раз инструмент отвечал
-#: `appended: True`. Запись была, работы не было.
-#:
-#: Правило он знал и сам его повторял вслух: склад определяется ЧИТАТЕЛЕМ, а
-#: не названием. Но знание жило в разговоре, а рука писала по названию.
-#: Поэтому знание переехало сюда, к самой руке.
+#: Journals that have a reader in code, and what that reader requires of a record.
 _KNOWN_JOURNALS: dict[str, dict] = {
     "data/self_improvement_issues.jsonl": {
         "reader": "core/campaign_io.py:114 — сборка контекста КАЖДОГО цикла",
@@ -59,38 +49,21 @@ _KNOWN_JOURNALS: dict[str, dict] = {
     },
 }
 
-#: Слова-заглушки. Поле с таким значением — это дырка, а не запись.
-#:
-#: Тот же вечер: решение о собственном весе было записано с полем
-#: `decision: PENDING — filled from the measured file contents in this turn`.
-#: Запись завели затем, чтобы прибор перестал врать молча, — и она молчала
-#: о самом решении.
+#: Filler words: a field holding one of these is a hole, not a record.
 _PLACEHOLDERS: frozenset[str] = frozenset({
     "pending", "todo", "tbd", "fixme", "xxx", "n/a", "na", "none", "-", "—",
     "заполнить", "уточнить", "позже", "placeholder", "заглушка",
 })
 
-#: Журнал решений агента о своём коде (core/own_decisions.py). Решение — выбор по уже
-#: собранным уликам, а не обещание решить, не план и не вставленный код.
+#: The agent's decisions about its own code (core/own_decisions.py): a choice made on
+#: gathered evidence, not a promise, a plan or pasted code.
 _DECISIONS_PATH = "data/own_decisions.jsonl"
 _NOT_A_DECISION = ("решение будет", "будет сформулировано", "сначала ")
 _CODE_START = ('"""', "'''", "```", "def ", "class ", "import ", "from ")
 _EVIDENCE_RE = re.compile(r"[\w./-]+\.(?:py|jsonl|json|md|txt|log|toml|yaml|yml)\b")
 
-#: Файлы состояния, у которых есть ХОЗЯИН в коде: класс, который их пишет,
-#: знает схему и отвечает за смысл строки. Сырая строка в таком файле — не
-#: запись, а подделка состояния.
-#:
-#: Найдено 2026-09-21. Агент подал заявку на патч этим инструментом прямо в
-#: ящик одобрений: строка без id и срока стала вечной висящей заявкой. Проверка
-#: того же вечера — тем же вызовом в ящик ложится ОДОБРЕННАЯ заявка на
-#: самоправку, подписанная «andre (operator)», и ApprovalInbox принимает её
-#: как решение человека. Ворота «проверь, потом разреши» обходились одной
-#: строкой.
-#:
-#: Список полный: `tests/test_an_agent_cannot_sign_its_own_approval.py`
-#: сканирует код и падает, если файл, который называет код, не записан ни
-#: сюда, ни в `_KNOWN_JOURNALS`.
+#: State files owned by a class in code; a raw line there would forge state. Every data file
+#: the code names must be listed here or in _KNOWN_JOURNALS (a test enforces it).
 _OWNED_STATE: dict[str, str] = {
     "data/self_repair_log.jsonl": (
         "это журнал самопочинки, его пишет core/patch_route после настоящего "
@@ -137,9 +110,9 @@ _OWNED_STATE: dict[str, str] = {
 
 
 def _registered_name(target: Path, data_dir: Path) -> str:
-    """Имя журнала по тому файлу, куда запись ляжет на деле, а не по написанию пути."""
+    """Journal name of the file the record will actually land in, not of the path as typed."""
     name = "data/" + target.relative_to(data_dir).as_posix()
-    # Регистр складывается всегда: на Windows `Approval_Inbox` — тот же файл.
+    # Always casefold: on Windows `Approval_Inbox` is the same file.
     for known in (*_OWNED_STATE, *_KNOWN_JOURNALS):
         if known.casefold() == name.casefold():
             return known
@@ -156,7 +129,7 @@ def _refuse_owned_state(path: str) -> None:
 
 
 def _refuse_placeholders(record: dict) -> None:
-    """Поле-заглушка — дырка, а не запись, и писать её значит терять работу."""
+    """Refuse a record with a field left as filler (PENDING, TODO and the like)."""
     for key, value in record.items():
         if isinstance(value, str) and value.strip().casefold().rstrip(".!") in _PLACEHOLDERS:
             raise ValueError(
@@ -171,17 +144,15 @@ def _refuse_placeholders(record: dict) -> None:
             )
 
 
-#: Поля времени, которые читатели разбирают как момент. `tests/
-#: test_a_naive_timestamp_is_read_as_utc.py` меряет тот же список в живом
-#: состоянии; 2026-09-20 сюда пришло `"ts": "2026-09-20"` — дата без часа и
-#: зоны, и замер покраснел. Запись без зоны — другой момент для каждого читателя.
+#: Time fields readers parse as a moment; they must carry a zone. Keep in step with
+#: tests/test_a_naive_timestamp_is_read_as_utc.py.
 _STAMP_KEYS = ("created_at", "updated_at", "completed_at", "started_at",
                "heartbeat_at", "run_after", "first_seen", "last_seen", "ts")
 _ZONE_RE = re.compile(r"(?:Z|[+-]\d{2}:?\d{2})$")
 
 
 def _refuse_hollow_decision(path: str, record: dict, root: Path) -> None:
-    """Запись решения принимается, только если это решение и оно опирается на файл, который есть."""
+    """Accept a decision record only if it is a decision citing an existing evidence file."""
     if path != _DECISIONS_PATH:
         return
     decision = str(record.get("decision") or "").strip()
@@ -207,13 +178,7 @@ def _refuse_naive_stamps(record: dict) -> None:
 
 
 def _refuse_broken_shape(path: str, record: dict, contract: dict) -> None:
-    """Запись, которую читатель молча отбросит, лучше не писать вовсе.
-
-    Читатель `self_improvement_issues.jsonl` отбрасывает запись без непустого
-    `fingerprint` и раскладывает строку в поле-списке ПОСИМВОЛЬНО: улика из
-    105 знаков стала 105 элементами, первый — буква `d` (замер 2026-09-20).
-    Оба отказа были молчаливыми, и оба стоили целого вечера.
-    """
+    """Refuse a record its reader would silently drop or split into characters."""
     missing = [f for f in contract["required"]
                if not str(record.get(f) or "").strip()]
     if missing:
@@ -229,44 +194,17 @@ def _refuse_broken_shape(path: str, record: dict, contract: dict) -> None:
         )
 
 
-#: Путь ГОЛОСА — единственный журнал, который человек читает как обращение к
-#: себе. Панель оператора показывает именно его.
+#: The voice journal: the one the human reads as messages to them (operator panel).
 VOICE_PATH = "data/chat_outbox.jsonl"
 
-#: Сколько раз за сутки агент вправе заговорить ПЕРВЫМ.
-#:
-#: Открыто словом оператора 2026-09-23 вместе с потолком, а не после него.
-#: Собрано из замеров внимания (см. заметку agent-autonomy-research-2):
-#: восстановление после прерывания — около 23 минут, прерывание в пять секунд
-#: утраивает число ошибок в сложной работе, а «умное» прерывание неврологически
-#: не отличается от глупого — полезность повода не отменяет цены. Жёсткий
-#: потолок 3-5 обращений в сутки на человека; взято верхнее.
-#:
-#: Потолок ЖЁСТКИЙ, а не мягкая цель: исчерпан — обращение ждёт следующих
-#: суток. Считается по самому файлу, а не по счётчику в памяти: перезапуск
-#: процесса не обнуляет чужое внимание.
+#: How many times a day the agent may speak first. A hard ceiling counted from the file
+#: itself, so a restart does not reset it.
 VOICE_CALLS_PER_DAY = 5
 
 
 
 def _stamp_voice_record(path: str, record: dict) -> dict:
-    """Запись голоса получает время, если его не поставил вызывающий.
-
-    Замер 2026-09-23 (через час после того, как потолок голоса был введён):
-    потолок НЕ РАБОТАЛ. В живых записях ящика лежат только `author` и `text`
-    — времени нет, — а счётчик отбирал записи по дате и потому видел ноль
-    обращений за сутки при одиннадцати записях в файле и двух сделанных за
-    этот же день. Мои тесты прошли, потому что в тестовых записях время было:
-    третий случай за день, когда зелёные тесты не увидели живой поломки.
-
-    Чинится У ИСТОКА, а не в счётчике. Считать записи без времени
-    «сегодняшними» значило бы мгновенно съесть весь запас старыми записями и
-    заткнуть агента; считать их «не сегодняшними» — то, что и происходило.
-    Обращение к человеку обязано знать, когда оно сделано: без этого нельзя
-    ни отмерить суточный запас, ни прочитать переписку по порядку.
-
-    Поле не перезаписывается: время, названное вызывающим, остаётся его.
-    """
+    """Add a UTC `ts` to a voice record that lacks one; a caller's own time is kept."""
     if path != VOICE_PATH or "ts" in record:
         return record
     stamped = dict(record)
@@ -275,7 +213,7 @@ def _stamp_voice_record(path: str, record: dict) -> dict:
 
 
 def _voice_calls_today(target: Path) -> int:
-    """Сколько раз агент уже заговорил первым за нынешние сутки UTC."""
+    """How many times the agent has already spoken first today (UTC)."""
     if not target.exists():
         return 0
     today = _dt.datetime.now(_dt.timezone.utc).date().isoformat()
@@ -290,17 +228,13 @@ def _voice_calls_today(target: Path) -> int:
             stamp = str(payload.get("ts") or payload.get("timestamp") or "")
             if stamp[:10] == today:
                 count += 1
-    except Exception:  # noqa: BLE001 — нечитаемый журнал не запирает голос
+    except Exception:  # noqa: BLE001 — an unreadable journal must not lock the voice
         return 0
     return count
 
 
 def _refuse_over_voice_budget(path: str, target: Path) -> None:
-    """Громкий отказ, когда суточный запас обращений исчерпан.
-
-    Отказ НАЗЫВАЕТ правило: агент, который не знает причины, угадывает её —
-    и угадывает неверно (тот же довод, что у двери памяти).
-    """
+    """Refuse loudly, naming the rule, once the daily voice budget is spent."""
     if path != VOICE_PATH:
         return
     used = _voice_calls_today(target)
@@ -316,8 +250,7 @@ def _refuse_over_voice_budget(path: str, target: Path) -> None:
         )
 
 
-#: Окно повтора (repeat_interval у Alertmanager): тот же случай не повторяется
-#: человеку раньше, чем через сутки.
+#: Repeat window (like Alertmanager's repeat_interval): one case is told at most once a day.
 VOICE_REPEAT_WINDOW = _dt.timedelta(hours=24)
 _VOICE_ID_RE = re.compile(r"sii_[0-9a-f]{8,}")
 _VOICE_NAME_RE = re.compile(r"\b[a-z]+(?:_[a-z]+)+\b")
@@ -330,8 +263,7 @@ def _voice_fingerprint(text: str) -> tuple[set[str], set[str], set[str]]:
 
 
 def _same_voice_case(a: str, b: str) -> bool:
-    """Тот же случай: общий id дефекта, или общее имя сигнала при заметном
-    совпадении слов, или просто почти тот же текст."""
+    """Same case: a shared defect id, a shared signal name with word overlap, or near-same text."""
     ids_a, names_a, words_a = _voice_fingerprint(a)
     ids_b, names_b, words_b = _voice_fingerprint(b)
     union = words_a | words_b
@@ -340,19 +272,14 @@ def _same_voice_case(a: str, b: str) -> bool:
 
 
 def _refuse_repeated_voice(path: str, target: Path, record: dict) -> None:
-    """Один случай — одно обращение (план субботы ж, 24.09).
-
-    24.09 все пять суточных обращений ушли за две минуты, и все — одна
-    жалоба на self_contradiction. Практика оповещений (Alertmanager:
-    отпечаток + repeat_interval): повтор того же случая в окне не шлётся.
-    """
+    """One case, one call: refuse repeating the same case within the repeat window."""
     if path != VOICE_PATH or not target.exists():
         return
     text = str(record.get("text") or "")
     now = _dt.datetime.now(_dt.timezone.utc)
     try:
         rows = read_state_jsonl_unlocked(target)
-    except Exception:  # noqa: BLE001 — нечитаемый журнал не запирает голос
+    except Exception:  # noqa: BLE001 — an unreadable journal must not lock the voice
         return
     for row in rows:
         payload = row.get("payload", row) if isinstance(row, dict) else {}
@@ -374,11 +301,7 @@ def _refuse_repeated_voice(path: str, target: Path, record: dict) -> None:
             )
 
 
-#: Поводы заговорить первым — ровно эти. Первый шаг «звать ли» отдельно от
-#: «что сказать» (ProAgentBench, arXiv 2602.04482: момент угадывается на 53–61%,
-#: и почти половина обращений лишние); повод назван — значит, его можно
-#: посчитать и потом сверить, отвечал ли человек делом (Proactive Agent,
-#: arXiv 2410.12361). Слово оператора 25.09: «всё доделать».
+#: The only reasons to speak first; a named reason can be counted and checked later.
 VOICE_REASONS = {
     "wall": "стена, которую открывает только человек (одобрение, доступ, деньги)",
     "before_irreversible": "неясная цель перед необратимым шагом",
@@ -389,13 +312,7 @@ VOICE_REASONS = {
 
 
 def _refuse_unreasoned_voice(path: str, record: dict) -> None:
-    """Обращение называет повод и, кроме доклада о результате, задаёт вопрос.
-
-    Horvitz (CHI 1999): разговор — чтобы снять КЛЮЧЕВУЮ неопределённость, с
-    учётом цены лишнего беспокойства; KnowNo (arXiv 2307.01928): спрашивать,
-    когда вариантов больше одного. Обращение без вопроса — доклад, а доклад
-    не стоит прерывания.
-    """
+    """A call names its reason and, unless it reports a result, asks a question."""
     if path != VOICE_PATH or str(record.get("author") or "").strip().lower() != "agent":
         return
     reason = str(record.get("reason") or "").strip()
@@ -425,7 +342,7 @@ class JournalAppendTool(Tool):
         "requires (missing required field, or a string where a list is read), "
         "and a field left as a placeholder (PENDING, TODO) is refused."
     )
-    # Append-only store; reversibility is guaranteed by the append-only journal semantics (no delete exists)
+    # Append-only: nothing is ever deleted, so the risk is reversible.
     risk = "reversible"
     arguments = (
         "path: str — data/<name>.jsonl, relative to the workspace root; "
@@ -436,17 +353,10 @@ class JournalAppendTool(Tool):
         self._workspace_root = workspace_root
 
     def _resolve(self, path: str) -> Path:
-        """The file under `<workspace>/data/` this path names — or ValueError.
-
-        Block 7 (audit W2, 2026-09-03): `workspace_root` was stored and never
-        read; the boundary was a string prefix, so `data/../../x.jsonl` passed
-        and the file landed relative to the CURRENT DIRECTORY, not the
-        workspace. The path is now resolved against the workspace and must
-        stay inside its `data/` after resolution.
-        """
+        """The file under `<workspace>/data/` this path names, after resolution; else ValueError."""
         if not path.startswith("data/") or not path.endswith(".jsonl"):
             raise ValueError(f"path must live under data/ and end in .jsonl: {path}")
-        if ":" in path:  # поток NTFS (`x.jsonl:y.jsonl`) — запись в чужой файл под другим именем
+        if ":" in path:  # NTFS stream (`x.jsonl:y.jsonl`) would write to another file
             raise ValueError(f"path must not contain ':': {path}")
         root = Path(self._workspace_root).resolve()
         target = (root / path).resolve()
@@ -465,8 +375,7 @@ class JournalAppendTool(Tool):
         if not isinstance(record, dict):
             raise TypeError(f"record must be a dict, got {type(record).__name__}")
         target = self._resolve(str(path))
-        # Все правила ниже сверяются с именем настоящего файла: `data/./x.jsonl`
-        # и `data/y/../x.jsonl` — тот же журнал, что `data/x.jsonl`.
+        # Rules below match the real file: `data/./x.jsonl` is the journal `data/x.jsonl`.
         name = _registered_name(target, (Path(self._workspace_root).resolve() / "data").resolve())
         _refuse_owned_state(name)
         record = _stamp_voice_record(name, record)
@@ -482,9 +391,7 @@ class JournalAppendTool(Tool):
         with state_file_lock(target):
             append_state_jsonl_unlocked(target, [record])
         result = {"path": path, "appended": True}
-        # Кто это прочтёт — часть ответа, а не украшение. Раньше инструмент
-        # отвечал `appended: True` и на запись в файл, которого не открывает
-        # никто, и отличить сделанную работу от потраченной было нельзя.
+        # Name the reader, so a write nobody reads is told apart from real work.
         if contract:
             result["reader"] = contract["reader"]
         else:

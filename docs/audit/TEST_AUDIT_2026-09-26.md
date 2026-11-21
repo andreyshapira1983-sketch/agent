@@ -194,7 +194,7 @@
 * `extract_from_task_and_review` (`core/directive_extractor.py:282`);
 * `reviewer_vs_contract` (`core/instruction_conflict_gate.py:275`);
 * `SourceRegistry.register_claim` (`core/source_registry.py:266`);
-* `format_duration_seconds` (`tools/current_time.py:14`).
+* `format_duration_seconds` (`tools/current_time.py:11`).
 
 Полный список (путь:строка):
 - **core**:

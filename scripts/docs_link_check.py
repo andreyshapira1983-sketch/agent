@@ -1,24 +1,4 @@
-"""Read-only guard: relative links in Markdown docs must resolve to real files.
-
-Scans the human-facing Markdown set (root ``README.md`` + everything under
-``docs/``) for Markdown links ``[text](target)`` and asserts every *relative*
-target resolves to an existing file on disk. This catches the drift class where
-a doc points at a path that moved or never existed (e.g. ``docs/INDEX.md``
-linking ``../AGENT_DOCTRINE.md`` at the repo root while the file lives in
-``docs/``).
-
-Contract / non-goals:
-- Only Markdown ``](...)`` links are checked -- not inline-code paths in prose.
-- External links (``http://``, ``https://``, ``mailto:``, ``tel:``) and pure
-  anchors (``#frag``) are skipped, as are bare words that do not look like paths.
-- A trailing ``#anchor`` and a trailing ``:LINE`` / ``:LINE-LINE`` line anchor
-  are stripped before the existence check: the file must exist, but line
-  numbers are not enforced (they drift and are brittle to gate on).
-- Pure read-only: no ``core`` import, no shell-out, no network access.
-
-Exit 0 when every relative link resolves; exit 1 (and print the offenders)
-otherwise. Wired into CI via ``tests/test_docs_link_check.py``.
-"""
+"""Check that relative Markdown links in README, docs/ and knowledge/ point at real files."""
 from __future__ import annotations
 
 import os
@@ -34,9 +14,7 @@ _LINE_ANCHOR_RE = re.compile(r":\d+(?:-\d+)?$")
 
 
 def _doc_files() -> list[str]:
-    """Every Markdown the repository owns: root README, ``docs/``,
-    ``knowledge/``.
-    """
+    """Every Markdown file the repository owns: root README, ``docs/``, ``knowledge/``."""
     files: list[str] = []
     readme = os.path.join(_ROOT, "README.md")
     if os.path.isfile(readme):
@@ -54,7 +32,7 @@ def _is_external(target: str) -> bool:
 
 
 def _normalize_target(target: str) -> str:
-    """Strip a ``#fragment`` and a trailing ``:LINE`` anchor; return the path."""
+    """Strip a ``#fragment`` and a ``:LINE`` anchor (line numbers drift; the file must exist)."""
     target = target.strip()
     if target.startswith("<") and target.endswith(">"):
         target = target[1:-1]

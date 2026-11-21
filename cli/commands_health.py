@@ -1,10 +1,4 @@
-"""Read-only local health panel commands.
-
-``:dry-health-pass`` is intentionally a collector, not a runner: it never
-starts the planner, the self-build producer, self-apply, tests, approvals, or
-network work. It reads small local state files best-effort and turns failures
-into ``unknown`` fields.
-"""
+"""Read-only ``:dry-health-pass`` panel: reads local state best-effort, never runs work."""
 from __future__ import annotations
 
 import json
@@ -147,9 +141,8 @@ def _daemon_payload(workspace: Path, now: datetime) -> dict[str, Any]:
             "event": heartbeat.get("event") if isinstance(heartbeat, dict) else None,
             "last_tick_at": last_tick_at,
             "staleness_threshold_seconds": threshold,
-            # Freshness alone cannot see a crash loop: the heartbeat is written
-            # BEFORE the tick's work, so a daemon failing every tick stays
-            # forever fresh. The streak is the missing half (MIR-135).
+            # The heartbeat is written before the tick's work, so a failing daemon
+            # stays fresh; only the error streak reveals a crash loop.
             "error_streak": error_tick_streak(workspace),
             "path": str(workspace / agent_tick.HEARTBEAT_PATH),
         }
@@ -165,7 +158,7 @@ def _daemon_payload(workspace: Path, now: datetime) -> dict[str, Any]:
 
 
 def _daemon_manual_mode_expected(scheduler: dict[str, Any]) -> bool:
-    """No due scheduled work — Stage-0 manual runs do not refresh heartbeat."""
+    """True when no scheduled work is due; manual runs do not refresh the heartbeat."""
     if scheduler.get("status") != "known":
         return False
     due = scheduler.get("due")
@@ -210,8 +203,7 @@ def _daemon_blocks_next_action(daemon: dict[str, Any]) -> bool:
         return True
     if status == "stale":
         return daemon.get("interpretation") != "expected_without_scheduled_daemon"
-    # Alive-and-failing blocks too: «everything fine, next action X» over a
-    # crash loop is the exact lie the streak exists to end (MIR-135).
+    # A fresh heartbeat over a crash loop must still block the next action.
     return daemon.get("interpretation") == "crash_loop_suspected"
 
 
@@ -358,10 +350,7 @@ def _cooldown_payload(workspace: Path, now: datetime) -> dict[str, Any]:
         remaining = agent_tick._cooldown_remaining_seconds(
             state or {}, cooldown_hours=hours, now=now
         )
-    # A health READING must never become a health INCIDENT: this block only
-    # computes a cooldown display, and its failure is reported through the
-    # returned status rather than swallowed — `status: unknown` carries the
-    # exception type to the operator.
+    # A health reading must never crash: the failure is returned as status "unknown".
     except Exception as exc:  # noqa: BLE001
         return {
             "status": "unknown",
@@ -445,8 +434,7 @@ def _grounded_target_payload(workspace: Path) -> dict[str, Any]:
             classification = "off_allowlist"
         if _is_critical(target):
             classification = "off_allowlist"
-    # Same rule: classification is advisory, and an unclassifiable target is
-    # an honest "unknown" WITH its cause in `reason`, not a crashed command.
+    # Classification is advisory: report "unknown" with the cause instead of crashing.
     except Exception as exc:  # noqa: BLE001
         return {"classification": "unknown", "reason": type(exc).__name__, "target_path": None}
     else:
@@ -498,10 +486,7 @@ def _git_tree_payload(workspace: Path) -> dict[str, Any]:
             check=False,
             timeout=5,
         )
-    # Shelling out to git is the one part of this probe that can fail for
-    # environmental reasons (no git, no repo, timeout). The operator gets
-    # `unknown` plus the exception type; the rest of the health report is
-    # worth more than this one line.
+    # No git, no repo or a timeout: report "unknown" and keep the rest of the panel.
     except Exception as exc:  # noqa: BLE001
         return {"status": "unknown", "reason": type(exc).__name__}
     if result.returncode != 0:
@@ -632,7 +617,7 @@ def _format_dry_health_pass(payload: dict[str, Any]) -> str:
 
 
 def _usefulness_payload(workspace: Path) -> dict[str, Any]:
-    """Пригодилась ли работа кампании потом (core/work_usefulness.py, 2026-09-25)."""
+    """Whether campaign work was used later (core/work_usefulness.py)."""
     from core.work_usefulness import market_accepted, measure, summary
 
     try:
@@ -642,7 +627,7 @@ def _usefulness_payload(workspace: Path) -> dict[str, Any]:
 
 
 def _subagent_promises(workspace: Path) -> dict[str, Any]:
-    """Обещал помощник / вернул помощник (core/subagent_predictions.py)."""
+    """What sub-agents promised versus what they returned (core/subagent_predictions.py)."""
     from core.subagent_predictions import tally
 
     return tally(workspace)

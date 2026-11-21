@@ -1,40 +1,4 @@
-"""MVP-14.2 — `web_fetch` tool: turn a web pointer into a verifiable source.
-
-`web_search` returns a list of (title, url, snippet) hits — POINTERS,
-not sources. The Verifier (MVP-14.4) cannot give a high confidence to
-a claim grounded only on a search snippet, because the snippet is
-adversarially short and could mis-represent the actual page.
-
-`web_fetch` is the upgrade path: given a URL, it performs ONE HTTP GET,
-strips HTML to plain text, applies the same redaction pipeline as every
-other tool, and returns a payload that the Evidence factory promotes to
-`kind="web_page"` with the document's content_hash and fetched_at. The
-Verifier can then say "this claim is supported by https://X fetched
-at T with sha256(content)=H".
-
-Safety model (defence in depth):
-
-  - **scheme allow-list**: only `https` by default; plain `http` is
-    accepted only for explicitly allowlisted hosts. No `file://`, no
-    `data:`, no `ftp:`.
-  - **ASCII URL**: the planner sanitiser enforces this earlier, but the
-    tool re-checks because tests bypass the planner.
-  - **egress policy + local-network block-list**: optional allow/deny host
-    patterns, DNS resolution checks, redirect re-validation, localhost,
-    127.0.0.0/8, 0.0.0.0, 10/8, 192.168/16, 172.16-31/12, link-local
-    169.254/16, and IPv6 loopback / unique-local are refused. Stops the
-    agent from being abused into a SSRF tool against internal services.
-  - **size cap**: read at most `max_bytes` (default 1 MiB), and cap again
-    after gzip decompression. Larger bodies are truncated with a marker.
-  - **timeout**: short (default 10 s); the loop's overall budget is
-    finite.
-  - **content-type allow-list**: text/html, text/plain, application/json
-    or xml. A binary blob is refused with a clean error.
-  - **redaction**: text is passed through `redact_text` before leaving
-    the tool — same defence-in-depth promise as every other tool.
-
-Risk: read_only. No file or process side effect.
-"""
+"""`web_fetch` tool: turn a web pointer (a search hit) into a verifiable, hashed source."""
 from __future__ import annotations
 
 import hashlib
@@ -56,23 +20,13 @@ from tools.network_safety import (
 )
 from tools.reddit_feed import feed_as_text, reddit_feed_url
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
 DEFAULT_TIMEOUT_SECONDS = 10.0
 DEFAULT_MAX_BYTES = 1 * 1024 * 1024            # 1 MiB
 MAX_URL_LEN = 2048
 USER_AGENT = "AutonomousAgent/MVP-14.2 (+evidence-layer)"
 
-#: «Здесь нет такого ресурса» — наблюдение о мире, а не поломка инструмента.
-#: RFC 9110 §15.5.5: 404 — «the origin server did not find a current
-#: representation for the target resource»; §15.5.11: 410 — то же, надолго.
-#: Экзамен 2026-09-25, задача про несуществующий пакет PyPI: API ответил 404
-#: трижды, инструмент поднимал ошибку, доказательство не легло в улики, агент
-#: крутил 14 вызовов, а проверка срезала верный ответ «пакета нет» (2 из 5
-#: прогонов провалены). Прочие коды (401/403/429/5xx) — по-прежнему ошибка:
-#: они ничего не говорят о существовании.
+#: 404/410 mean "no such resource" (RFC 9110 §15.5.5, §15.5.11): an observation, not a tool
+#: failure. Other codes (401/403/429/5xx) stay errors: they say nothing about existence.
 _NOT_FOUND_CODES = frozenset({404, 410})
 
 
@@ -100,50 +54,21 @@ ALLOWED_CONTENT_TYPES: tuple[str, ...] = (
     "application/json",
     "application/xml",
     "application/xhtml+xml",
-    # Первоисточник лежит в PDF. Замер 2026-09-20 по двум суткам трасс:
-    # web_search отработал 67 раз из 67, web_fetch — 79 успехов и 28 ошибок,
-    # и 15 из 28 были одной причиной — «application/pdf not in allow-list».
-    # Адреса говорят сами за себя: Тьюринг 1936, Нётер, Шеннон 1948, ACM.
-    # Поиск находил первоисточники, читалка их не открывала — вот чем «поиск
-    # и чтение не соединены». Список держит двоичный мусор снаружи и держит
-    # его дальше: PDF — документ, и берётся из него только ТЕКСТ, чистым
-    # питоном, без запуска чего бы то ни было.
+    # Primary sources are often PDFs; only their text is extracted (see _pdf_text).
     "application/pdf",
 )
 
-#: Сколько страниц PDF читается. Первоисточник бывает на сотни страниц, а
-#: улике всё равно достаётся вырезка: читать всё значит платить временем за
-#: то, что будет отброшено.
+#: PDF pages read: the evidence keeps only an excerpt, so more pages cost time for nothing.
 PDF_MAX_PAGES = 40
 
-#: Сколько байт разрешено скачать, когда сервер отдал PDF.
-#:
-#: Живой замер 2026-09-20, 21:5x, после того как оператор сказал «опять PDF
-#: не работают». Статья «Attention Is All You Need» на arXiv весит 2 215 244
-#: байта при общем потолке чтения в 1 МиБ. Обрезанный PDF не читается ВООБЩЕ:
-#: таблица перекрёстных ссылок лежит в КОНЦЕ файла, и вместе с хвостом
-#: срезается оглавление всего документа. pypdf падает с `PdfStreamError`, а
-#: до того печатает «EOF marker not found».
-#:
-#: То есть разрешение читать PDF, поставленное часом раньше, работало только
-#: на документах меньше мегабайта — а первоисточники столько не весят. Для
-#: HTML обрезка безобидна (начало текста остаётся), для PDF она фатальна, и
-#: одним потолком эти два случая мерить нельзя.
-#:
-#: Восемь мебибайт покрывали статью с рисунками, но не книгу: 24.09 учебник
-#: «Algorithms» (Erickson) весит 25 055 430 байт и получил отказ по потолку.
-#: Тридцать два мебибайта берут его с запасом; текста всё равно берётся не
-#: больше `PDF_MAX_PAGES` страниц, так что цена — только трафик и память.
+#: PDF download cap: a truncated PDF cannot be opened at all (its cross-reference table is
+#: at the END), so PDFs get their own cap, large enough for a textbook.
 PDF_MAX_BYTES = 32 * 1024 * 1024
 
-#: Сколько страниц PDF-скана распознаётся (слово оператора 24.09). Скан без
-#: текстового слоя давал отказ «scanned images?» — три таких первоисточника в
-#: следах. Распознавание — страница за страницей в песочнице convert_file, это
-#: минуты, а не секунды; десять страниц покрывают статью.
+#: Scanned-PDF pages to OCR: minutes, not seconds, in the convert_file sandbox.
 PDF_OCR_MAX_PAGES = 10
 
-#: Исполнитель программ для распознавания; None — песочница convert_file.
-#: Подмена — только в тестах (на Windows песочницы нет).
+#: OCR program runner; None means the convert_file sandbox. Replaced only in tests.
 _ocr_runner = None
 
 # Blocks we strip together with their content.
@@ -214,24 +139,15 @@ def _strip_blocks_and_tags(text: str) -> str:
     return _strip_tags(_strip_blocks(text))
 
 
-# ---------------------------------------------------------------------------
-# Tool
-# ---------------------------------------------------------------------------
-
-
-#: Сколько текста вокруг совпадения и сколько совпадений показывать.
+#: Characters shown around each match, and the number of match windows shown.
 FIND_RADIUS = 600
 FIND_MAX_WINDOWS = 6
 
 
 def find_windows(text: str, find: str) -> str:
-    """Куски страницы вокруг совпадений `find` (термины через |), с шапкой.
+    """Page text around the matches of `find` (terms separated by |), with a header line.
 
-    Цепочка веб-знания, 2026-09-20: страница RFC 9114 скачана целиком
-    (146 111 символов), а модели дошли ~1,8 тыс. — отбор абзацев по словам
-    РУССКОГО вопроса к английской странице не нашёл ничего и отдал шапку и
-    список версий. У книги есть find_in_files, у страницы не было ничего.
-    Нет совпадений — честная пометка и прежний текст страницы.
+    No match: a marker line, then the page text as before.
     """
     terms = [t.strip() for t in (find or "").split("|") if t.strip()][:5]
     hits = sorted({m.start() for t in terms for m in re.finditer(re.escape(t), text, re.IGNORECASE)})
@@ -250,11 +166,9 @@ def find_windows(text: str, find: str) -> str:
     return head + "\n" + "\n…\n".join(text[lo:hi] for lo, hi in shown)
 
 def _pdf_text(raw: bytes) -> str:
-    """Текст PDF — и ничего, кроме текста.
+    """Text of a PDF via pdftotext; a broken file is a named refusal, never an empty string.
 
-    Извлечение через pdftotext -layout: внешняя программа, как в convert_file.
-    Битый или зашифрованный файл — это отказ с названной причиной, а не пустая
-    строка: молчаливая пустота выглядела бы как «страница без содержания».
+    A PDF without a text layer is a scan and goes to OCR.
     """
     import tempfile as _tempfile
     from pathlib import Path as _Path
@@ -285,24 +199,16 @@ def _pdf_text(raw: bytes) -> str:
 
 
 def _mostly_latin(text: str) -> bool:
-    """Кириллица есть, но её меньше 10% букв — это латинский текст с подменами.
-
-    Русский документ — больше половины кириллицы; английский, испорченный
-    похожими буквами, — единицы процентов.
-    """
+    """True when some letters are Cyrillic but under 10%: Latin text with look-alike swaps."""
     letters = [ch for ch in text if ch.isalpha()]
     cyrillic = sum(1 for ch in letters if "Ѐ" <= ch <= "ӿ")
     return bool(cyrillic) and cyrillic < 0.10 * len(letters)
 
 
 def _ocr_scanned_pdf(raw: bytes) -> str:
-    """Скан без текстового слоя — распознать теми же программами, что convert_file.
+    """OCR a scan without a text layer, only inside the convert_file sandbox.
 
-    Чужой PDF — опасный вход: разбирать его советуют только в изоляции
-    (OCRmyPDF, «PDF security issues»). Поэтому pdftoppm и tesseract идут ТОЛЬКО
-    через песочницу convert_file — пользователь nobody, временная папка, свои
-    таймауты, — а без песочницы распознавания нет, есть отказ с причиной.
-    Рабочая папка агента не трогается: всё во временной, и она удаляется.
+    A foreign PDF is dangerous input: without the sandbox there is a named refusal, not OCR.
     """
     import tempfile as _tempfile
     from pathlib import Path as _Path
@@ -314,10 +220,8 @@ def _ocr_scanned_pdf(raw: bytes) -> str:
         tool = ConvertFileTool(_Path(root), runner=_ocr_runner)
         try:
             out = tool.run(op="ocr", path="scan.pdf", max_pages=PDF_OCR_MAX_PAGES)
-            # Живая проверка 24.09 (Cooley–Tukey, 1965): с rus+eng английский скан
-            # вышел с кириллицей на месте похожих букв — «ап N Х N», «т sparse».
-            # Числа и слова такой улики не сверяются с источником. Почти без
-            # кириллицы — документ английский: распознать его английским.
+            # rus+eng OCR swaps look-alike Cyrillic into English scans: a mostly Latin
+            # result is read again as English.
             if _mostly_latin(str(out.get("text") or "")):
                 out = tool.run(op="ocr", path="scan.pdf", lang="eng", max_pages=PDF_OCR_MAX_PAGES)
         except ConvertRefused as exc:
@@ -366,18 +270,16 @@ class WebFetchTool(Tool):
             raise ValueError(f"timeout_seconds must be > 0, got {timeout_seconds}")
         self.max_bytes = int(max_bytes)
         self.timeout_seconds = float(timeout_seconds)
-        #: Persistent `web_fetches` meter (block 7, W3); None = unmetered.
+        #: Persistent `web_fetches` meter; None means unmetered.
         self.budget_ledger = budget_ledger
-        # Injectable for tests — production passes None and we build a
-        # default opener that talks real HTTP.
+        # Test seam; None builds the real HTTP opener.
         self._opener = opener
         self._network_policy = NetworkSafetyPolicy(
             tool_name=self.name,
             allowed_schemes=ALLOWED_SCHEMES,
             max_url_len=MAX_URL_LEN,
             resolver=resolver,
-            # Stub openers in unit tests should not do real DNS. Production
-            # fetches and resolver-injected tests do.
+            # A stub opener alone (unit tests) skips real DNS; an injected resolver does not.
             resolve_dns=opener is None or resolver is not None,
             allow_http_hosts=(
                 allow_http_hosts
@@ -399,19 +301,15 @@ class WebFetchTool(Tool):
     def risk_for(self, arguments: dict[str, Any]) -> Risk:
         return "read_only"
 
-    # ------------------------------------------------------------------
-    # run
-    # ------------------------------------------------------------------
-
     def _read_limit_for(self, content_type: str) -> int:
-        """Потолок чтения для этого ответа: у PDF он свой, см. `PDF_MAX_BYTES`."""
+        """Read cap for this response; PDFs have their own (`PDF_MAX_BYTES`)."""
         if "application/pdf" in (content_type or "").lower():
             return max(self.max_bytes, PDF_MAX_BYTES)
         return self.max_bytes
 
     def run(self, url: str, find: str = "") -> dict[str, Any]:
         self._network_policy.validate_url(url, role="web_fetch url")
-        # Страница Reddit собирается скриптом — читаем её ленту (tools/reddit_feed.py).
+        # A Reddit page is built by script, so its feed is read instead (tools/reddit_feed.py).
         feed_url = reddit_feed_url(url)
         if feed_url:
             self._network_policy.validate_url(feed_url, role="web_fetch reddit feed url")
@@ -456,14 +354,12 @@ class WebFetchTool(Tool):
         if truncated:
             raw = raw[:limit]
 
-        # Decompress gzip if needed.
         if content_encoding == "gzip":
             try:
                 raw, decompressed_truncated = decompress_gzip_limited(raw, limit)
                 truncated = truncated or decompressed_truncated
             except OSError:
-                # Truncated gzip; fall back to raw bytes — the strip
-                # below still produces SOME text.
+                # Truncated gzip: keep the raw bytes, the strip below still yields some text.
                 pass
 
         if not (feed_url and "xml" in (content_type or "").lower()):
@@ -485,7 +381,7 @@ class WebFetchTool(Tool):
             text_raw = raw.decode(charset, errors="replace")
             text_clean = self._strip_html(text_raw)
         if "json" in content_type.lower():
-            # Факты API не тонут в README: tools/json_view.py.
+            # API facts must not drown in a README field (tools/json_view.py).
             from tools.json_view import compact_json_view
             text_clean = compact_json_view(text_raw, truncated=truncated) or text_clean
 
@@ -498,9 +394,7 @@ class WebFetchTool(Tool):
         if found is not None:
             text_safe = found
 
-        # Hash the FULL content we read (post-decompression, pre-strip
-        # but post-decode) — gives a stable "same page" handle even
-        # when whitespace cleanup differs across runs.
+        # Hash the decoded text before stripping: a stable "same page" handle across cleanups.
         content_hash = hashlib.sha256(
             text_raw.encode("utf-8", errors="replace")
         ).hexdigest()
@@ -525,10 +419,6 @@ class WebFetchTool(Tool):
                 "description": "web_fetch makes no changes; no rollback needed",
             },
         }
-
-    # ------------------------------------------------------------------
-    # validate_output
-    # ------------------------------------------------------------------
 
     def validate_output(self, output: Any) -> tuple[bool, list[str]]:
         if not isinstance(output, dict):
@@ -563,28 +453,11 @@ class WebFetchTool(Tool):
             warnings.append("fetched page has no extractable text")
         return True, warnings
 
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
-
-    # F-7 (docs/audit/FIELD_CHECK_QUEUE.md), 2026-08-25: здесь лежали два
-    # СТАТИЧЕСКИХ дубликата живой проверки — `_validate_url` и
-    # `_check_host_not_local`. Их не звал никто (сплошной разбор: ни вызова, ни
-    # ссылки) и не держал ни один тест, а политику они собирали СВОЮ, с иными
-    # настройками, чем `self._network_policy`, собранная в `__init__`.
-    #
-    # Опасны они были не бездействием, а тем, что следующий читатель позвал бы
-    # их, считая живой проверкой, и получил бы другие настройки — порода
-    # «покрытие списали у соседа». Живой путь проверяет URL дважды: до запроса
-    # и ПОВТОРНО после перенаправления; обе проверки на месте и закреплены
-    # tests/test_no_dead_copy_of_a_live_guard.py.
-
     @staticmethod
     def _check_content_type(content_type: str) -> None:
         ct_lower = (content_type or "").split(";", 1)[0].strip().lower()
         if not ct_lower:
-            # An empty content-type is unusual but seen in the wild;
-            # accept and treat as text/plain.
+            # An empty content-type is seen in the wild; treat it as text/plain.
             return
         if ct_lower not in ALLOWED_CONTENT_TYPES:
             raise PermissionError(
@@ -605,8 +478,7 @@ class WebFetchTool(Tool):
     @staticmethod
     def _strip_html(text: str) -> str:
         """Cheap, dependency-free HTML→text. Good enough for evidence."""
-        # Remove script/style blocks (including their content), then replace
-        # remaining tags with a space so adjacent words don't merge.
+        # Blocks go with their content; other tags become a space so adjacent words don't merge.
         cleaned = _strip_blocks_and_tags(text)
         # Decode the most common entities.
         cleaned = (
@@ -620,10 +492,7 @@ class WebFetchTool(Tool):
         )
         # Collapse runs of whitespace within a line.
         cleaned = _WHITESPACE_RE.sub(" ", cleaned)
-        # Squash >2 blank lines down to 2.
-        # Строка из одних пробелов — пустая строка. Веб-экзамен 2026-09-19,
-        # набор 2, N12: страница PyPI на 90 КБ на четверть состояла из « \n»,
-        # и «Released: Sep 15, 2026» оказалось на краю окна, которое видит агент.
+        # A line of only spaces counts as blank; then squash >2 blank lines down to 2.
         cleaned = _SPACE_ONLY_LINES_RE.sub("", cleaned)
         cleaned = _BLANKLINES_RE.sub("\n\n", cleaned)
         return cleaned.strip()

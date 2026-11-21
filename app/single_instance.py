@@ -1,34 +1,4 @@
-"""Single-instance guarantee for the daemon (plan item 1.3).
-
-Only one continuous-service daemon may run at a time. This module provides
-:class:`SingleInstanceLock`, a small cross-platform lock file that:
-
-- refuses to start a second daemon while one is already running; - recovers
-automatically from a *stale* lock left behind by a crashed process (the
-operating system releases the lock when the owning process dies, so a new
-instance can acquire it without manual clean-up); - never removes a lock
-that another *live* process still holds; - releases the OS lock on normal
-shutdown but leaves the lock *file* on disk; - reports a clear, actionable
-message identifying the running instance.
-
-Source of truth --------------- The **OS lock is the only source of truth**
-for whether a daemon is running. The presence of ``data/daemon.lock`` on
-disk does **not** mean a daemon is alive: the file is a permanent service
-artefact that persists after the daemon exits. ``release()`` deliberately
-never unlinks it — deleting the pathname is racy on POSIX and could permit
-two simultaneous owners (see :meth:`SingleInstanceLock.release`). A
-leftover, unlocked file is therefore the normal, healthy resting state; the
-next :meth:`SingleInstanceLock.acquire` re-locks it and rewrites the
-diagnostics.
-
-The file also stores small JSON diagnostics (pid, hostname, start time) so
-an operator — or the "already running" error message — can point at the
-culprit. Those diagnostics are advisory only; correctness comes from the OS
-lock, not from the PID written in the file.
-
-This module does not import or replace ``agent_tick.py``; the single-shot
-fallback mode never needs the daemon lock.
-"""
+"""Single-instance lock for the daemon; the OS lock, not the lock file, is the source of truth."""
 from __future__ import annotations
 
 import json
@@ -44,17 +14,11 @@ if os.name == "nt":  # pragma: no cover - platform-specific import
 else:  # pragma: no cover - platform-specific import
     import fcntl
 
-# Default location for the daemon lock. Relative on purpose: no machine-specific
-# absolute paths are baked into the repository (matches the project convention
-# used by, e.g., the approval inbox default under ``data/``).
+# Relative on purpose: no machine-specific absolute path in the repository.
 DEFAULT_LOCK_PATH = Path("data") / "daemon.lock"
 
-# Windows uses *mandatory* byte-range locking, so a locked byte cannot even be
-# read by another handle. We therefore lock a single byte far beyond the tiny
-# JSON payload region: the lock still guarantees exclusivity, but the
-# diagnostics at offset 0 stay readable for the "already running" reporter and
-# for operators. (POSIX ``flock`` is advisory and whole-file, so this offset is
-# irrelevant there.)
+# Windows byte locks are mandatory (a locked byte is unreadable), so lock one byte far past
+# the JSON diagnostics at offset 0; POSIX flock is whole-file and ignores the offset.
 _WINDOWS_LOCK_OFFSET = 0x40000000  # 1 GiB — well past any diagnostics payload
 
 
@@ -104,8 +68,7 @@ class SingleInstanceLock:
         if self._fh is not None:
             return self
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        # Open without truncating so an existing PID stays readable if we fail
-        # to take the lock (r+ needs the file to exist; fall back to a+).
+        # No truncation: the holder's diagnostics stay readable if the lock is busy.
         try:
             fh = self._path.open("r+")
         except FileNotFoundError:
@@ -116,16 +79,14 @@ class SingleInstanceLock:
             details = self._read_details(fh)
             fh.close()
             raise AlreadyRunningError(self._path, details) from None
-        # We own the lock now: record diagnostics for operators.
         self._write_details(fh)
         self._fh = fh
         return self
 
     def release(self) -> None:
-        """Release the lock but keep the lock file on disk. Idempotent.
+        """Drop the OS lock and close the handle; idempotent.
 
-        Releasing only drops the OS lock, closes the file handle, and clears
-        internal state. The lock *file* is intentionally **not** unlinked.
+        The file is never unlinked: unlinking is racy on POSIX and could allow two owners.
         """
         fh = self._fh
         if fh is None:

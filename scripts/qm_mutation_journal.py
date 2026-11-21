@@ -1,17 +1,6 @@
-"""What is mutated right now, written where a lost context can still read it.
+"""Journal of production files mutated as temporary instruments, readable after a lost context.
 
-The mapping program mutates production files as temporary instruments and
-restores them byte-for-byte. Until now the restore invariant — which path,
-which baseline hash — lived only in model context. Twenty applications
-survived on the fact that no turn was ever cut between the mutation and the
-restore.
-
-RECOVER is authorised ONLY for paths recorded in an open entry whose
-baseline is mechanically tied to the snapshot. Those are restored from the
-snapshot and verified by hash.
-
-The journal lives under `knowledge/quantum/`, outside every frozen subject
-path, so it can never itself trip the subject guard.
+Usage: python scripts/qm_mutation_journal.py [open|close|status|recover] [paths ...] [--note=TEXT]
 """
 from __future__ import annotations
 
@@ -22,14 +11,14 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+# Outside every SUBJECT_PATHS root, so the journal itself never trips the subject guard.
 JOURNAL = ROOT / "knowledge" / "quantum" / "MUTATION_JOURNAL.json"
 SNAPSHOT = "f88997395abd7ade9f5a7bbb7e7e57db7a2cd1ee"
 SUBJECT_PATHS = ("core", "cli", "app", "api", "tools", "agent_tick.py", "main.py")
 
 CLEAN, OPEN, RESTORED, CONFLICT, UNREADABLE = 0, 1, 2, 3, 4
 
-#: A partial rather than a helper function: the one-operation ratchet counts
-#: nested definitions too, and this file is allowed exactly one.
+# A partial, not a helper: the one-operation ratchet counts nested defs and allows one here.
 _RUN = functools.partial(  # nosec B603
     subprocess.run, cwd=ROOT, capture_output=True, text=True, check=False,
     encoding="utf-8", errors="replace", timeout=120)
@@ -83,6 +72,7 @@ def journal(action: str, paths: tuple[str, ...] = (), note: str = "") -> tuple[i
         JOURNAL.unlink()
         return CLEAN, ["closed; every path matches its snapshot baseline"]
 
+    # Restore only journaled paths (baseline = snapshot hash); other drift is reported, kept.
     if action == "recover":
         lines: list[str] = []
         if entry is not None:

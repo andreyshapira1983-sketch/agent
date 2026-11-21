@@ -1,6 +1,7 @@
-"""Карта полномочий памяти: какое решение способно изменить каждое хранилище.
+"""Memory authority map: which decision each data/*.jsonl store is able to change.
 
-Замер, отвергнутые варианты и границы: MIR-150 в docs/audit/MASTER_ISSUE_REGISTRY.md.
+Run from the repository root: python scripts/memory_authority_map.py [--json].
+It prints one line per store (authority, writers, readers); --json prints the full map.
 """
 from __future__ import annotations
 
@@ -14,20 +15,20 @@ import sys
 _ROOTS = ("core", "app", "cli", "api", "tools", "scripts")
 _EXTRA_FILES = ("agent_tick.py", "main.py")
 
-#: Четыре уровня, которые нельзя смешивать. Порядок — по возрастанию власти.
-INERT = "inert"           # запись существует, живого читателя нет
-REASONING = "reasoning"   # содержимое попадает в промпт: меняет ответ, не ветку
-GATE = "gate"             # ветка кода читает значение и меняет ход исполнения
-ACTION = "action"         # значение разрешает эффект: трату, применение, действие
+#: Four levels that must not be mixed, in increasing order of power.
+INERT = "inert"           # the record exists, no live reader
+REASONING = "reasoning"   # content reaches a prompt: changes the answer, not a branch
+GATE = "gate"             # a code branch reads the value and changes execution
+ACTION = "action"         # the value permits an effect: spending, applying, acting
 
-#: Вызовы, означающие ЭФФЕКТ — необратимое или внешнее действие.
+#: Calls that mean an effect: an irreversible or external action.
 _EFFECT_CALL = re.compile(
     r"(approve|reserve|charge|spend|commit|apply_|execute|dispatch|send_|"
     r"write_file|launch|grant|activate)",
     re.IGNORECASE,
 )
 
-#: Признаки того, что значение уходит в промпт модели, а не в ветку.
+#: Signs that the value goes into a model prompt rather than a branch.
 _PROMPT_SINK = re.compile(
     r"(prompt|system=|messages|\.complete\(|render_|_context\(|instructions)",
     re.IGNORECASE,
@@ -38,7 +39,7 @@ _TREE_CACHE: dict[pathlib.Path, ast.Module] = {}
 
 
 def _tree(path: pathlib.Path) -> ast.Module | None:
-    """Разбор файла один раз на прогон: карта строится по 24 хранилищам."""
+    """Parse each file once per run; the map walks it again for every store."""
     if path not in _TREE_CACHE:
         try:
             _TREE_CACHE[path] = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
@@ -64,11 +65,7 @@ _FUNC_INDEX: list[tuple[pathlib.Path, str, str, str]] = []
 
 
 def _func_index(files: list[pathlib.Path]) -> list[tuple[pathlib.Path, str, str, str]]:
-    """Один разбор тел на прогон: (файл, имя, исходник тела, исходник return-ов).
-
-    Развёртка имён идёт до неподвижной точки по 24 хранилищам; без этого
-    указателя один и тот же `unparse` считался бы десятки тысяч раз.
-    """
+    """(file, name, body source, return-values source) per function, built once per run."""
     if _FUNC_INDEX:
         return _FUNC_INDEX
     for path in files:
@@ -89,23 +86,13 @@ def _func_index(files: list[pathlib.Path]) -> list[tuple[pathlib.Path, str, str,
 
 
 def path_aliases(store: str, files: list[pathlib.Path]) -> set[str]:
-    """Имена, которыми хранилище зовут в коде, помимо самого имени файла.
-
-    Без этого шага зонд слеп: путь почти везде собран в константе модуля
-    (``_LEDGER = DATA_DIR / "budget_ledger.jsonl"``), и в телах функций стоит
-    ИМЯ КОНСТАНТЫ, а не имя файла. Первый прогон 2026-08-25 на этом и провалил
-    контроль — бюджетный леджер вышел «без писателей», хотя резервирование
-    пишет в него на каждой трате.
-    """
+    """Names the code uses for a store besides its file name: module constants, resolvers."""
     names: set[str] = {store}
     for path in files:
         tree = _tree(path)
         if tree is None:
             continue
-        # ТОЛЬКО уровень модуля. Внутри функций встречаются `path`, `store`,
-        # `result` — обычные локальные имена; принятые за адрес хранилища, они
-        # совпадают с чем угодно и раздувают перепись (113 «писателей» у
-        # эпизодической памяти в прогоне до этого сужения).
+        # Module level only: local names such as `path` or `store` would match anything.
         for node in tree.body:
             if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
                 if store not in ast.unparse(node.value):
@@ -114,22 +101,16 @@ def path_aliases(store: str, files: list[pathlib.Path]) -> set[str]:
                 for t in targets:
                     if not isinstance(t, ast.Name):
                         continue
-                    # Константа или приватное имя модуля: обычные строчные
-                    # имена уровня модуля адресом хранилища не бывают.
+                    # Only constants and private module names address a store.
                     if t.id.isupper() or t.id.startswith("_"):
                         names.add(t.id)
-            # Значение по умолчанию у параметра — тоже адрес хранилища: вызов
-            # такой функции есть обращение к нему.
+            # A parameter default naming the store makes each call of the function an access.
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 for default in node.args.defaults + node.args.kw_defaults:
                     if default is not None and store in ast.unparse(default):
                         names.add(node.name)
 
-    # Адрес хранилища распространяется через функции-резолверы:
-    # ``return Path(workspace) / DEFAULT_TOOL_RECEIPTS_PATH`` — сама константа
-    # стоит только здесь, а пишут и читают те, кто зовёт резолвер. Без этого
-    # шага квитанции инструментов выходили «без единого обращения», хотя файл
-    # весит мегабайт.
+    # The address spreads through resolvers (`return ws / CONST`); their callers access it.
     idx = _func_index(files)
     for _ in range(3):
         grown = False
@@ -145,14 +126,7 @@ def path_aliases(store: str, files: list[pathlib.Path]) -> set[str]:
 
 
 def owner_classes(store: str, aliases: set[str], files: list[pathlib.Path]) -> set[str]:
-    """Классы, держащие хранилище в своём атрибуте.
-
-    Третий способ владения после литерала и константы: ``ApprovalInbox(path=ws /
-    "data" / "approval_inbox.jsonl")``. Внутри методов стоит ``self.path``, и
-    ни имени файла, ни имени константы там нет — до этого прохода ящик
-    одобрений выходил «без единого писателя», хотя пишется на каждом
-    предложении.
-    """
+    """Classes constructed with the store's address; their methods reach it as self.path."""
     owners: set[str] = set()
     for path in files:
         tree = _tree(path)
@@ -174,11 +148,7 @@ def owner_classes(store: str, aliases: set[str], files: list[pathlib.Path]) -> s
 
 
 def _accessors_for(store: str, files: list[pathlib.Path]) -> dict[str, set[str]]:
-    """Функции, в теле которых названо хранилище — прямо или через константу.
-
-    Это ВЛАДЕЛЬЦЫ доступа: снаружи хранилище видно только через них. Разделение
-    на писателей и читателей — по тому, какой примитив состояния вызван внутри.
-    """
+    """Functions naming the store, split into readers and writers by the state call inside."""
     aliases = path_aliases(store, files)
     owners = owner_classes(store, aliases, files)
     found: dict[str, set[str]] = {"read": set(), "write": set()}
@@ -213,12 +183,7 @@ def _accessors_for(store: str, files: list[pathlib.Path]) -> dict[str, set[str]]
 
 
 def _authority_of(reader_ref: str) -> tuple[str, str]:
-    """Чем распоряжается функция, прочитавшая хранилище.
-
-    Классификация по СТОКУ значения, а не по имени функции: имя лжёт, сток —
-    нет. Порядок проверок — от сильного к слабому, потому что одна функция
-    может и ветвиться, и уходить в промпт; тогда она считается по сильнейшему.
-    """
+    """A reader's authority, judged by the value's sink (strongest first), never by its name."""
     path_s, _, func = reader_ref.rpartition(":")
     tree = _tree(pathlib.Path(path_s))
     if tree is None:
@@ -242,13 +207,7 @@ _ENTRY_POINTS = ('run_tick', 'main', 'run_autonomous_cycle', 'execute_loop')
 
 
 def reachable_functions(files: list[pathlib.Path]) -> set[str]:
-    """Имена функций, достижимые от живых входов по графу вызовов.
-
-    Различает ВОЗМОЖНОСТЬ доступа и ЖИВОЕ использование: у хранилища может быть
-    читающий метод, которого никто не зовёт. По именам, а не по типам, поэтому
-    оценка ЩЕДРАЯ — недостижимое здесь недостижимо и на самом деле, а
-    достижимое требует ручной проверки.
-    """
+    """Names reachable from live entry points by call graph (by name, so an over-estimate)."""
     calls: dict[str, set[str]] = {}
     for _path, fname, body, _rets in _func_index(files):
         try:

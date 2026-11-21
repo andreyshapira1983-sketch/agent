@@ -1,38 +1,4 @@
-"""Autonomous agent daemon tick.
-
-This script is designed to be called by Windows Task Scheduler (or any cron
-equivalent) on a fixed interval — e.g. every 30 minutes. It does NOT stay
-running; it wakes up, does one bounded health pass, writes results to disk,
-and exits. Zero risk of runaway processes.
-
-What one tick does
-------------------
-1. Load scheduler store → find schedules that are due.
-2. Enqueue due schedules as RuntimeTasks.
-3. Claim pending RuntimeTasks → run AutonomousRuntime (dry-run by default).
-4. If any pytest tests FAILED → call RepairProposalGenerator → put result
-   in ApprovalInbox so the human sees it next time they open the REPL.
-5. Write a tick summary to logs/daemon_tick.jsonl.
-6. Exit with code 0 (success) or 1 (hard error).
-
-Environment variables
----------------------
-AGENT_WORKSPACE   path to workspace root (default: directory of this file)
-AGENT_PROVIDER    mock | openai | anthropic  (unset falls back to anthropic;
-                  .env.example ships mock so a fresh clone stays offline)
-AGENT_TICK_DRY_RUN  1 = never write real files, 0 = allow effects (default: 1)
-
-Usage
------
-python agent_tick.py                    # run once, workspace = .
-python agent_tick.py --workspace C:/x   # explicit workspace
-python agent_tick.py --allow-effects    # disable dry-run (use with care)
-python agent_tick.py --status           # print pending inbox items and exit
-
-Windows Task Scheduler quick-start
------------------------------------
-Run scripts/install_daemon.ps1 to register the scheduled task automatically.
-"""
+"""Daemon tick for Task Scheduler or cron: one bounded pass over schedules and tasks, then exit."""
 from __future__ import annotations
 
 import argparse
@@ -66,67 +32,28 @@ WORKSPACE_DEFAULT = Path(os.environ.get("AGENT_WORKSPACE", Path(__file__).parent
 DATA_DIR           = "data"
 APPROVAL_INBOX_PATH = DEFAULT_APPROVAL_INBOX_PATH
 SCHEDULES_PATH     = "data/runtime_schedules.jsonl"
-# ONE queue, and it is the one the operator writes to. Until 2026-08-05 the
-# daemon read `data/task_queue.jsonl`, which no other module mentions, while
-# `:task-add`, the scheduler CLI and the health command all used
-# `data/runtime_tasks.jsonl` (`app/bootstrap.py`, `app/task_scheduler_cli.py`,
-# `cli/commands_health.py`). A task queued by hand was therefore invisible
-# here — measured on the live workspace: 27 consecutive ticks logged
-# `no_pending_tasks` while an `auto_run` task sat `pending` in the other
-# store. The daemon was not refusing the work; it could not see it.
-#
-# Imported rather than re-declared, so a third path cannot appear the same
-# quiet way. `tests/test_one_task_store.py` fails if it does.
+# The queue the operator writes to; imported, not re-declared (tests/test_one_task_store.py).
 TASK_QUEUE_PATH    = str(DEFAULT_RUNTIME_TASKS_PATH)
 INCIDENT_LOG_PATH  = "data/incidents.jsonl"
 HEARTBEAT_PATH     = _hb.HEARTBEAT_PATH
-# The single-instance lock every queue consumer must hold while draining. Same
-# path app/single_instance.py documents, so a future always-on daemon and this
-# cron tick exclude each other rather than both claiming tasks.
+# Every queue consumer holds this lock while draining; same path as app/single_instance.py.
 DAEMON_LOCK_PATH   = "data/daemon.lock"
 
-#: Сколько раз пробовать выбрать цель на старте кампании. Замер
-#: 2026-09-01T23:27: одна попытка — и прогон умирал на первой отвергнутой
-#: цели, хотя внутри прогона право сменить исчерпанную цель уже есть.
+# Goal-pick attempts at campaign start: one rejected pick must not end the run.
 _GOAL_PICK_ATTEMPTS = 3
 BUDGET_LEDGER_PATH = "data/budget_ledger.jsonl"
 BUDGET_CONFIG_PATH = "config/budget_limits.json"
-# Persistent cooldown state for the autonomous self-build producer (TD-026).
-# Holds the ISO timestamp of the last *successfully proposed* item so the daemon
-# does not create a new self-build proposal more often than the cooldown window.
+# Self-build producer cooldown state: ISO time of the last successfully proposed item.
 SELF_BUILD_STATE_PATH = "data/self_build_producer_state.json"
-# Default hours between autonomous self-build proposals. Conservative by design;
-# override via AGENT_SELF_BUILD_COOLDOWN_HOURS.
+# Hours between self-build proposals; override with AGENT_SELF_BUILD_COOLDOWN_HOURS.
 SELF_BUILD_COOLDOWN_HOURS_DEFAULT = 12.0
 
-# Liveness constants and helpers live in core/heartbeat_io.py: whether the daemon
-# is alive is an input to a decision (best_next_action asks it), and the core may
-# not import this script to find out. Re-exported here under the original names
-# so existing callers and tests are unaffected.
+# Re-exported from core/heartbeat_io.py (the core may not import this script).
 EXPECTED_TICK_INTERVAL_SECONDS = _hb.EXPECTED_TICK_INTERVAL_SECONDS
 STALENESS_FACTOR = _hb.STALENESS_FACTOR
 
-# Memory profile for the unattended (daemon/cron) agent. Defined once here
-# because all three build sites below must stay identical.
-#
-# Phase 1 — connect experience memory to the core WITHOUT granting it a voice
-# in durable state:
-#   with_experience=True     the unattended agent finally holds episodic and
-#                            procedural stores (before this it held none, so it
-#                            could neither record nor recall experience)
-#   episodic_replay=False    it may read that experience, but must never serve
-#                            a stored answer in place of running a real cycle
-#   durable_writes={"episode", "hygiene"}
-#                            a TWO-SINK allowlist: episodes so the work leaves
-#                            a trace, hygiene so housekeeping is recorded,
-#                            while procedural promotion, consolidation,
-#                            knowledge, source registry, profile and
-#                            assumptions all stay denied by default-deny
-#   with_memory=False        unchanged — no cross-run session memory
-#
-# The claim that episodes are quarantined (`usage_eligible=False`) was measured
-# false on 2026-08-20: 136 of 200 banked episodes are eligible, 127 of them
-# admitted by the unconditional `lesson` tag exemption. See MIR-115.
+# Unattended agent memory: reads experience but never replays a stored answer; durable
+# writes only to episode and hygiene (default-deny for the rest); no cross-run session memory.
 UNATTENDED_MEMORY_PROFILE = {
     "with_memory": False,
     "with_experience": True,
@@ -136,22 +63,9 @@ UNATTENDED_MEMORY_PROFILE = {
 
 
 def unattended_memory_profile(workspace, env=None) -> dict:
-    """Профиль памяти для безнадзорной сборки агента.
+    """Unattended memory profile: the constant above, plus two sinks under an active sandbox grant.
 
-    Производственный ответ — константа выше, буква в букву. Единственное
-    исключение названо и ограничено сроком: включённое полномочие песочницы
-    (`core/burn_in_sandbox.py`, две независимые подписи) добавляет два стока,
-    чтобы проверенный урок мог пережить прогон. Без полномочия функция
-    возвращает ровно `UNATTENDED_MEMORY_PROFILE`.
-
-    Функция, а не константа, потому что ответ зависит от рабочей копии: одна и
-    та же сборка в песочнице и в производстве обязана давать разные списки, и
-    место, где эта разница решается, должно быть одно.
-
-    Зовите её с переменной, названной `workspace`: четыре производственных
-    места сборки агента сверяются сторожем
-    `tests/test_ownership_must_not_change_authority.py` БУКВАЛЬНО, и разные
-    имена переменной читаются там как разный конверт полномочий.
+    Call it with a variable named `workspace`: a test compares the four build sites literally.
     """
     from core.burn_in_sandbox import memory_profile_for
 
@@ -176,12 +90,9 @@ _is_stale = _hb.is_stale
 
 
 def _check_budget_kill_switch(workspace: Path):
-    """Evaluate (and latch) the persistent budget kill-switch for this tick.
+    """Evaluate and latch the budget kill-switch from the ledger alone (no agent, no model).
 
-    Reads the persistent budget ledger directly — no agent / LLM is built —
-    so the check is cheap and happens *before* any planner/synthesizer work.
-    Returns a ``KillSwitchState``; ``.active`` is True when the autonomous day
-    budget is exhausted and the daemon must skip LLM-heavy work.
+    Returns a KillSwitchState; `.active` means the day budget is spent and model work is skipped.
     """
     from core.budget_kill_switch import BudgetKillSwitch, default_path
     from core.budget_ledger import BudgetLedger
@@ -201,44 +112,10 @@ def _dry_run_visibility(
     processed_effects: int = 0,
     did_work: bool = True,
 ) -> dict:
-    """Honest observability fields for the current tick — PURE, NO behaviour change.
+    """Pure observability fields for this tick: mode, effects, processed_effects, dry_run_streak.
 
-    A pure function: no file/env/clock reads, no side effects. The caller is
-    responsible for sourcing ``previous_streak`` (e.g. from the prior heartbeat)
-    and ``processed_effects`` (count of effects actually applied this tick).
-
-    This block only *describes* what the daemon is (not) doing; it never enables
-    effects, never touches approval policy, and never alters proposal logic. It
-    is also kept SEPARATE from run_status / result_status — those answer "did the
-    run finish" and "what did it establish"; these answer "what mode am I in and
-    did I apply anything".
-
-    Args:
-      - ``dry_run``          — whether this tick runs without applying effects.
-      - ``previous_streak``  — dry_run_streak carried from the previous tick.
-      - ``processed_effects``— effects actually applied this tick (normally 0).
-      - ``did_work``         — whether this tick actually ran a dry-run pass
-                               (``tasks_processed > 0``). An IDLE no-op tick
-                               (nothing due, nothing pending) did no work and
-                               carries no information, so it must NOT inflate the
-                               streak. Defaults to ``True`` so callers that only
-                               care about mode/effects keep the simple behaviour.
-
-    Returns:
-      - ``mode``             — ``"dry_run"`` or ``"live"``.
-      - ``effects``          — ``"disabled"`` in dry-run, else ``"enabled"``
-                               (i.e. *policy-allowed*, not "already applied").
-      - ``processed_effects``— echoed back, clamped to a non-negative int. In
-                               practice 0: dry-run applies nothing and the live
-                               path is still gated into the approval inbox.
-      - ``dry_run_streak``   — consecutive *meaningful* dry-run passes. On a
-                               dry-run tick that did work it is ``previous_streak
-                               + 1`` (regardless of test health — a failed /
-                               inconclusive dry-run pass is STILL a dry-run pass).
-                               On an IDLE dry-run tick (``did_work`` false) it is
-                               carried forward UNCHANGED — an idle tick adds no
-                               information and must not dilute the stall signal.
-                               A live tick resets it to 0.
+    The streak counts dry-run ticks that did work; an idle tick carries it unchanged and a live
+    tick resets it to 0. `effects` is what policy allows, not what was applied.
     """
     try:
         prev = max(0, int(previous_streak))
@@ -263,8 +140,7 @@ def _dry_run_visibility(
 
 
 def _log_idle_tick(workspace: Path) -> None:
-    """Empty queue: say so, then what the agent would do anyway. Sensor, not
-    gate — decision in `core.self_build_memory.idle_self_direction`."""
+    """Log an empty queue, then what the agent would do anyway (a sensor, not a gate)."""
     _log_tick(workspace, {"event": "no_pending_tasks"})
     try:
         from core.self_build_memory import idle_self_direction
@@ -276,16 +152,9 @@ def _log_idle_tick(workspace: Path) -> None:
 
 
 def _classify_test_health(tests_result: dict | None) -> str:
-    """Map a ``tests_result`` payload to a single honest health verdict.
+    """Map a tests_result payload to "none", "pass", "fail" or "inconclusive".
 
-    Returns one of:
-      - ``"none"``         — no tests ran this tick (nothing to claim).
-      - ``"pass"``         — tests finished cleanly with at least one pass.
-      - ``"fail"``         — at least one test failed or errored.
-      - ``"inconclusive"`` — the run timed out, had no exit code, or collected
-                             zero tests. This is the key fix: a timed-out run
-                             must NEVER be read as ``"pass"`` just because its
-                             failure count is zero.
+    A run that timed out, has no exit code or ran zero tests is inconclusive, never a pass.
     """
     if not tests_result:
         return "none"
@@ -297,8 +166,6 @@ def _classify_test_health(tests_result: dict | None) -> str:
     if failed > 0:
         return "fail"
     if int(tests_result.get("passed", 0) or 0) == 0:
-        # exit_code present, zero failures, but nothing actually ran:
-        # this is not evidence of health.
         return "inconclusive"
     return "pass"
 
@@ -306,22 +173,15 @@ def _classify_test_health(tests_result: dict | None) -> str:
 
 # ── status-only mode ──────────────────────────────────────────────────────────
 
-#: Сколько одинаковых действий по одной цели подряд считать траекторией-петлёй.
-#: Не порог суждения, а порог ВНИМАНИЯ: строка ничего не запрещает, она зовёт
-#: посмотреть. Три — потому что два повтора бывают у любой честной работы, а
-#: живая петля была 150.
+# One action repeated on one goal this many times is shown as a loop (attention, not a ban).
 _TRAJECTORY_REPEAT_MIN = 3
 
-#: Окно, за которым петля считается прошедшей. Наблюдённая шла 27 часов.
+# Window after which a loop counts as over.
 _TRAJECTORY_WINDOW_HOURS = 48
 
 
 def _trajectory_status_lines(workspace: Path) -> list[str]:
-    """Строки о повторяющейся траектории — или пусто, если её нет.
-
-    Замер, отвергнутые варианты и границы: MIR-149 в docs/audit/MASTER_ISSUE_REGISTRY.md.
-    Только чтение и никогда не бросает.
-    """
+    """Status lines about a repeating trajectory, or none; read-only, never raises."""
     lines: list[str] = []
     try:
         from datetime import datetime, timedelta, timezone
@@ -346,7 +206,7 @@ def _trajectory_status_lines(workspace: Path) -> list[str]:
                 continue
             key = (str(row.get("goal") or ""), str(row.get("action") or ""))
             groups.setdefault(key, []).append(row)
-    except (OSError, ValueError):  # pragma: no cover — чтение не вправе ронять строку
+    except (OSError, ValueError):  # pragma: no cover — reading must not break the status line
         return []
 
     for (goal, action), rows in sorted(groups.items(), key=lambda kv: -len(kv[1])):
@@ -363,18 +223,9 @@ def _trajectory_status_lines(workspace: Path) -> list[str]:
 
 
 def _quarantine_status_lines(workspace: Path) -> list[str]:
-    """Строки о потерянных строках состояния — или пусто, когда терять нечего.
+    """Status lines about quarantined state rows, or none; read-only, never raises.
 
-    H-29 в docs/audit/HISTORICAL_FAILURE_LEDGER.md. Порченая строка уезжает в
-    `.quarantine`, файл переписывается без неё, и читатель получает список
-    короче, ничем не отличая его от полного. У обычного журнала это потеря
-    памяти; у СЧЁТЧИКА-ПОТОЛКА это выданное разрешение — замер показал, что
-    исчерпанный суточный потолок после порчи одной строки снова разрешает
-    тратить. Решение (разрешать или отказывать) здесь не меняется: оно про
-    деньги и принадлежит оператору. Закрывается молчание.
-
-    Только чтение и никогда не бросает: строка состояния обязана печататься
-    даже на повреждённом дереве.
+    A row dropped from a cap store reads as spending room, so the loss must be visible.
     """
     from core.state_integrity import quarantine_dir_for
 
@@ -400,9 +251,7 @@ def _quarantine_status_lines(workspace: Path) -> list[str]:
     return lines
 
 
-#: Отметки пульса, означающие «тик кончился отказом». Подстрокой, а не точным
-#: списком: события такого рода заводятся по мере надобности, и новый
-#: `*_error` не должен молча вернуть строке слово «alive» (H-38).
+# Heartbeat events meaning the tick failed; by substring, so a new *_error never reads as alive.
 def _is_failure_event(event: object) -> bool:
     text = str(event or "").lower()
     return "error" in text or "exception" in text or "fail" in text
@@ -429,13 +278,7 @@ def _print_status(workspace: Path) -> int:
                 file=sys.stderr,
             )
         elif _is_failure_event(last_event):
-            # H-38: пульс пишется и на ветке ОТКАЗА, поэтому свежесть отметки
-            # говорила «жив», а правда лежала в скобках после неё. Замер
-            # 2026-08-24: три подряд упавших тика печатали
-            # «Daemon: alive — last tick 0.0 min ago (event=tick_error)».
-            # Оператор, глянувший за неделю одну строку, читает первое слово.
-            # Решение о вечном повторе не меняется (MIR-135, открыт отдельно) —
-            # меняется СЛОВО, которым строка ведёт.
+            # The heartbeat is written on failure too: a fresh failed tick must not say "alive".
             print(
                 f"Daemon: FAILING — last tick {age_min:.1f} min ago ended in "
                 f"{last_event}. The clock is ticking and no work is landing.",
@@ -448,26 +291,17 @@ def _print_status(workspace: Path) -> int:
                 file=sys.stderr,
             )
 
-    # Block 7 (W1): open incidents reach the one line the operator reads.
     from core.incident import IncidentLog
 
     incident_line = IncidentLog(path=workspace / INCIDENT_LOG_PATH).status_line()
     if incident_line:
         print(incident_line, file=sys.stderr)
 
-    # Dry-run visibility from the last heartbeat: honest "what was (not) applied".
     if heartbeat is not None:
         mode = heartbeat.get("mode", "?")
         effects = heartbeat.get("effects", "?")
         streak = heartbeat.get("dry_run_streak", "?")
-        # F-5 (docs/audit/FIELD_CHECK_QUEUE.md): `processed_effects` убрано из
-        # строки. Оно передаётся ЖЁСТКИМ НУЛЁМ в обоих местах записи пульса, то
-        # есть постоянная, а в строке читалось как счётчик применённых эффектов.
-        # Обоснование в докстринге («живой путь упирается в ящик одобрений»)
-        # неполно: при выданном разрешении (H-41) тик применяет эффекты сам и
-        # поле всё равно показывает ноль. Из пульса поле НЕ убрано — схему
-        # парсят кампания и память; убрано только оттуда, где число попадает
-        # человеку на глаза и выглядит измерением.
+        # processed_effects is not shown: it is always written as 0 and would read as a count.
         print(
             f"Mode: {mode} (effects={effects}, dry_run_streak={streak})",
             file=sys.stderr,
@@ -482,7 +316,7 @@ def _print_status(workspace: Path) -> int:
         for item in pending:
             print(f"  [{item.id}] {item.operation}: {item.summary}", file=sys.stderr)
 
-    # Self-build producer visibility (TD-027) — read-only, never raises.
+    # Self-build producer state; read-only, never raises.
     for line in _self_build_status_block(workspace, heartbeat, pending, inbox):
         print(line, file=sys.stderr)
     for line in _quarantine_status_lines(workspace):
@@ -503,15 +337,7 @@ def _print_status(workspace: Path) -> int:
 # ── repair proposal after failed tests ───────────────────────────────────────
 
 def _repair_target_from_failures(failed_names: list[str], workspace: Path) -> str | None:
-    """Pick a single concrete repair target from failing test names.
-
-    `RepairProposalGenerator.generate` requires one existing `target_path`;
-    it does NOT auto-pick a target. Each failing name looks like
-    ``tests/foo.py::Klass::test_bar`` — the part before ``::`` is the test
-    file. We return that file only when the failures point at exactly one
-    existing file; otherwise we return None so the caller refuses cleanly
-    instead of guessing across multiple files.
-    """
+    """The one existing test file the failures point at, else None (never guess between files)."""
     files: list[str] = []
     for name in failed_names:
         path = (name or "").split("::", 1)[0].strip()
@@ -522,23 +348,14 @@ def _repair_target_from_failures(failed_names: list[str], workspace: Path) -> st
     return files[0] if len(files) == 1 else None
 
 
-#: Имена исключений — устойчивая часть диагноза. Всё прочее в нём
-#: переформулируется от тика к тику.
+# Exception names are the stable part of a diagnosis; the rest is reworded every tick.
 _CAUSE_RE = re.compile(r"\b([A-Z][A-Za-z0-9]*(?:Error|Exception|Warning|Timeout))\b")
 
 
 def _cause_fingerprint(text: str) -> str:
-    """Причина сбоя, сведённая к устойчивому следу.
+    """A failure diagnosis reduced to its sorted exception names ("" when it names none).
 
-    Ревизия PR #333: прежний ключ склеивал цель починки и имена упавших
-    тестов, поэтому ТОТ ЖЕ тест, упавший по ДРУГОЙ причине, давал ту же
-    строку — материально другая беда молча пряталась за первой заявкой.
-
-    Осторожность обратной стороны важнее прямой. Диагноз — свободный текст, и
-    взять его целиком значило бы вернуть размножение заявок с другого конца:
-    каждая переформулировка открывала бы новую. Поэтому берётся только
-    множество имён исключений; диагноз без такого имени даёт пустой след,
-    то есть прежнее поведение и никакой выдуманной причины.
+    Not the free text: every rewording would open a new repair proposal.
     """
     found = sorted({m.group(1) for m in _CAUSE_RE.finditer(text or "")})
     return "|".join(found)
@@ -547,11 +364,7 @@ def _cause_fingerprint(text: str) -> str:
 def _repair_dedup_key(
     target_path: str, failed_names: list[str], cause: str = ""
 ) -> str:
-    """Устойчивое имя ОДНОЙ поломки: цель починки + упавшие тесты + причина.
-
-    Порядок имён не значим (pytest выдаёт их как придётся), поэтому множество
-    сортируется. Зачем ключ вообще: см. место вызова в `_maybe_propose_repair`.
-    """
+    """Stable name of one breakage: repair target + failing tests (order-free) + cause."""
     fingerprint = "|".join(sorted({str(n) for n in failed_names}))
     if cause:
         fingerprint += "##" + cause
@@ -594,8 +407,7 @@ def _maybe_propose_repair(
 
         if report.status == "proposed" and report.proposal is not None:
             prop = report.proposal
-            # RepairProposal (core/self_repair.py) carries `path` / `reason` /
-            # `proposed_content` — NOT target_file/description/patch_preview.
+            # RepairProposal fields are path/reason/proposed_content, not target_file/description.
             description = (prop.reason or report.diagnosis or "").strip() or "(no description)"
             summary_lines = [
                 f"{failed} test(s) failed: {', '.join(failed_names[:5])}",
@@ -610,19 +422,8 @@ def _maybe_propose_repair(
                     f"{failed} failing test(s)",
                     f"evidence: {', '.join(report.evidence[:3])}",
                 ),
-                # Одна неустранённая поломка — одна просьба. Без ключа
-                # `ApprovalInbox.add` не дедуплицирует вовсе, а починка ждёт
-                # человека, значит каждый следующий тик видел ТУ ЖЕ поломку и
-                # клал в ящик ещё одну такую же заявку (аудит автономности
-                # 2026-09-17). Ящик — не только вход человека, но и ворота:
-                # полоса самоприменения отказывается работать, пока в нём есть
-                # ожидающие. Размножение заявок глушило настоящие просьбы и
-                # само себя блокировало.
-                #
-                # Ключ описывает ПОЛОМКУ (цель починки + имена упавших тестов
-                # + устойчивый след причины), а не предложенное лечение:
-                # перефразированный диагноз — та же беда, другой упавший тест
-                # или другое исключение — уже другая.
+                # One breakage, one request: the inbox dedupes only by key, and pending duplicates
+                # also block the self-apply lane. The key names the breakage, not the fix.
                 dedup_key=_repair_dedup_key(
                     target_path, failed_names,
                     _cause_fingerprint(
@@ -647,15 +448,11 @@ def _maybe_propose_repair(
         return {"repair_proposed": False, "reason": f"generator status: {report.status}"}
 
 
-# ── autonomous self-build producer wiring (TD-026) ────────────────────────────
+# ── autonomous self-build producer wiring ─────────────────────────────────────
 
 
 def _self_build_cooldown_hours() -> float:
-    """Resolve the cooldown window in hours (env override, else default).
-
-    Read at call time (not import time) so the daemon and tests can tune it via
-    ``AGENT_SELF_BUILD_COOLDOWN_HOURS`` without reloading the module.
-    """
+    """Cooldown hours from AGENT_SELF_BUILD_COOLDOWN_HOURS, read at call time, else the default."""
     raw = os.environ.get("AGENT_SELF_BUILD_COOLDOWN_HOURS")
     if raw is None or not str(raw).strip():
         return SELF_BUILD_COOLDOWN_HOURS_DEFAULT
@@ -730,14 +527,9 @@ def _self_build_status_lines(
     approved_self_apply: int,
     now: datetime | None = None,
 ) -> list[str]:
-    """Render the read-only 'Self-build' block for the operator ``--status`` view.
+    """Render the read-only Self-build block for --status; pure, never raises.
 
-    Pure and fully defensive (TD-027): never raises on a missing/corrupt
-    heartbeat, missing/corrupt producer state, or an unparseable timestamp — it
-    degrades to a clear line instead. The last producer status is taken from the
-    heartbeat and is labelled explicitly as *historical* (the outcome of the last
-    completed tick), NOT a live gate. The ONLY value computed live here is the
-    remaining cooldown, derived from the producer state file.
+    The last status comes from the heartbeat (historical); only the cooldown is computed live.
     """
     hb = heartbeat if isinstance(heartbeat, dict) else {}
     st = state if isinstance(state, dict) else {}
@@ -781,15 +573,7 @@ def _self_build_status_lines(
 
 
 def _provider_health_line(workspace: Path) -> str:
-    """One line naming any provider the router is currently skipping.
-
-    Found by auditing MIR-132's own closure against the field's named
-    circuit-breaker failures (2026-08-22): every source says a breaker without
-    visibility is untunable and its trips must be observable — and ours was
-    invisible. A demotion that nobody can see is indistinguishable from a
-    provider that simply stopped being chosen, which is exactly the
-    unexplained-quiet the week-long run must not produce.
-    """
+    """One line naming any provider the router is currently skipping, so demotions are visible."""
     try:
         from core.model_usage import ModelUsageLedger, ModelUsageLimits
 
@@ -810,11 +594,7 @@ def _provider_health_line(workspace: Path) -> str:
             if reason:
                 parts.append(f"{provider} SKIPPED ({reason})")
                 continue
-            # "ok" must not mean "not in cooldown right now". The first draft
-            # of this line reported «anthropic ok» for a provider with 391
-            # credit refusals and zero successes — stale failures fall out of
-            # the cooldown, and the operator would have read a dead key as
-            # healthy. The last recorded outcome is what he actually needs.
+            # "ok" means the last recorded call succeeded, not merely "not in cooldown now".
             rows = ledger._recent_rows_for(provider, limit=1)
             last = str((rows[-1] if rows else {}).get("status") or "?")
             if last == "success":
@@ -831,11 +611,9 @@ def _provider_health_line(workspace: Path) -> str:
 def _self_build_status_block(
     workspace: Path, heartbeat: dict | None, pending_items: list, inbox: ApprovalInbox
 ) -> list[str]:
-    """Gather producer state + inbox counts and format them; never raises.
+    """Producer state and inbox counts as status lines; never raises.
 
-    Reuses the already-computed ``pending_items`` list so we do not trigger a
-    second ``inbox.pending()`` (which enforces TTL on read). Any unexpected error
-    degrades to a single 'status unavailable' line so ``--status`` cannot crash.
+    Reuses `pending_items`: a second inbox.pending() would enforce the TTL again on read.
     """
     try:
         from core.self_apply_bridge import SELF_APPLY_OPERATION
@@ -857,7 +635,7 @@ def _self_build_status_block(
             pending_self_apply=pending_sa,
             approved_self_apply=approved_sa,
         )
-        # TD-028: compact subagent-ledger summary (read-only; never runs anything).
+        # Subagent ledger summary; read-only, runs nothing.
         try:
             from core.subagent_registry import SubagentRegistry
 
@@ -884,15 +662,10 @@ def _maybe_produce_self_build(
     kill_switch: Any = None,
     budget_snapshot: Any = None,
 ) -> dict:
-    """Run the autonomous self-build producer at most once per tick (TD-026).
+    """Run the self-build producer at most once per tick, behind a persistent cooldown gate.
 
-    The producer (TD-025) owns the kill-switch/budget/approval/dirty-tree gates;
-    this wrapper adds ONLY a persistent cooldown gate that runs *before* the
-    agent is built, so ``cooldown_wait`` never constructs an agent. It creates at
-    most one approval inbox item, never applies/commits/pushes and never runs the
-    self-apply lane. Any exception is swallowed into ``status="error"`` so a tick
-    can never crash here. Heavy collaborators are injectable for deterministic
-    tests (no real LLM/provider/network/git).
+    The cooldown is checked before any agent is built; the producer owns every other gate.
+    At most one inbox item, nothing applied; any exception becomes status="error".
     """
     now_iso = now_iso or _now_iso()
     try:
@@ -904,7 +677,7 @@ def _maybe_produce_self_build(
 
     hours = cooldown_hours if cooldown_hours is not None else _self_build_cooldown_hours()
 
-    # ── cooldown gate (the ONLY gate this layer owns) — before build_agent ──
+    # Cooldown gate (the only gate this layer owns), before any agent is built.
     remaining = _cooldown_remaining_seconds(
         _read_producer_state(workspace), cooldown_hours=hours, now=now_dt
     )
@@ -938,22 +711,11 @@ def _maybe_produce_self_build(
         if vcs is None:
             vcs = SafeVCS(workspace=workspace)
 
-        # `app.bootstrap`, like the other two build sites in this file. This used
-        # to read `__import__("main", fromlist=["build_agent"])`, and the Phase-7
-        # extraction that reduced `main.py` to 47 lines moved `build_agent` out
-        # from under it — so every real tick died here with
-        # `AttributeError: module 'main' has no attribute 'build_agent'`.
-        #
-        # It survived the extraction because the call named its target in a
-        # *string*: no import to update, nothing for a linter or for
-        # `scripts/architecture_invariants.py` to resolve. A plain import cannot
-        # rot the same way — it breaks loudly at import time instead.
+        # A plain import, never a module name in a string: a moved build_agent must break loudly.
         if build_agent_fn is not None:
             builder = build_agent_fn
         else:
-            # Imported here, not at module scope: `app.bootstrap` pulls in the
-            # whole agent graph, and a caller that supplied its own builder
-            # should not pay for loading it.
+            # Lazy: app.bootstrap loads the whole agent graph; an injected builder skips that.
             from app.bootstrap import build_agent as _build_agent
 
             def builder(workspace):
@@ -965,9 +727,7 @@ def _maybe_produce_self_build(
         agent = builder(workspace)
         llm = agent.model_router.for_role("synthesizer")
 
-        # TD-028: record role performance into the subagent ledger (best-effort).
-        # A registry load/write failure must never break the tick, so this is
-        # fully guarded; the producer additionally guards its own recording.
+        # Subagent ledger for role performance; best effort, its failure never breaks the tick.
         registry = None
         try:
             from core.subagent_registry import SubagentRegistry
@@ -988,20 +748,11 @@ def _maybe_produce_self_build(
         result = report.to_dict() if hasattr(report, "to_dict") else dict(report)
         status = result.get("status", "error")
 
-        # Cooldown is spent ONLY when a proposal is actually created; a wait /
-        # veto / no_patch / error must let the next tick try again immediately.
+        # Only a created proposal spends the cooldown; any other outcome may retry next tick.
         if status == "proposed":
             _write_producer_state(workspace, now_iso)
 
-        # Journal the outcome so a refusal becomes a retrievable lesson.
-        # Every OTHER self-build touch-point already does this — the autonomous
-        # runtime and the `:self-build-*` / `:self-apply-run` operator commands —
-        # but the tick dropped `result` on the floor. The cost was silent and
-        # exact: `recently_vetoed_self_build_targets()` reads episodes tagged
-        # `self-build` + `critic_veto`, and nothing on this path ever wrote one,
-        # so a veto raised by the daemon taught it nothing and the next tick
-        # retried the same target forever. Best-effort by contract: it swallows
-        # every failure and returns a bool, so journaling cannot break a tick.
+        # Journal the outcome so a veto teaches the next tick (best effort, never raises).
         record_self_build_episode(agent, kind="self-build-produce", result=result)
 
         return {
@@ -1009,10 +760,7 @@ def _maybe_produce_self_build(
             "approval_id": result.get("approval_id"),
             "target_path": result.get("target_path"),
             "next_human_action": result.get("next_human_action", ""),
-            # `ProducerReport.reason` explains every non-exception outcome
-            # (`dirty_tree_wait`, `veto`, `no_patch`, …). Dropping it here left
-            # the caller with a bare status word for exactly the cases that are
-            # NOT crashes — the common ones.
+            # Explains every non-exception outcome (dirty_tree_wait, veto, no_patch, ...).
             "reason": result.get("reason", ""),
         }
     except Exception as exc:  # noqa: BLE001
@@ -1024,19 +772,7 @@ def _maybe_produce_self_build(
 
 
 def _self_build_status_line(sb_status: str, sb: dict) -> str:
-    """The operator-facing line for a self-build outcome. Pure, so it is testable.
-
-    Printing the bare status word threw away everything that made the outcome
-    actionable. Three fields carry that, and each covers a different case:
-
-    * ``error``            — the swallowed exception (the wrapper turns every
-      exception into ``status="error"`` so a tick cannot crash, which is right,
-      but left the operator reading one word while the cause went to a
-      different event in ``logs/daemon_tick.jsonl``);
-    * ``reason``           — every *ordinary* refusal: dirty tree, veto,
-      no_patch. These are the common outcomes, and they are not crashes;
-    * ``next_human_action`` — what to do about it.
-    """
+    """Operator line for a self-build outcome: status, then error or reason, then next action."""
     detail = sb.get("error") or sb.get("reason") or ""
     advice = sb.get("next_human_action") or ""
     line = f"[agent_tick] Self-build producer: {sb_status}"
@@ -1049,24 +785,18 @@ def _self_build_status_line(sb_status: str, sb: dict) -> str:
 
 
 def _ensure_env_loaded(workspace: Path) -> None:
-    """Load ``<workspace>/.env`` if present. Ambient exports keep priority
-    (``load_dotenv`` never overrides), a missing file is silent, and calling
-    it twice is a no-op — so any entry point may load before it needs a pin."""
+    """Load <workspace>/.env if present; exported variables win and a repeat call is a no-op."""
     from dotenv import load_dotenv
 
     load_dotenv(Path(workspace) / ".env")
-    # Дом реестра молчавших объявляет точка входа (Д5, 2026-09-03).
+    # The entry point declares where the silent-model roster lives.
     ensure_roster_home(Path(workspace))
 
 
 # ── main tick ─────────────────────────────────────────────────────────────────
 
 def _charter_goal_router(workspace: Path) -> Any:
-    """Роутер, которым агент выбирает цель от хартии.
-
-    Отдельной функцией, а не строкой внутри `main`, потому что этот путь уже
-    один раз потерял бухгалтерию и терял её молча.
-    """
+    """Router for the agent's own goal pick (charter or drives), with spend and cap accounting."""
     from app.bootstrap import (
         DEFAULT_BUDGET_LEDGER_PATH,
         DEFAULT_MODEL_USAGE_PATH,
@@ -1075,13 +805,8 @@ def _charter_goal_router(workspace: Path) -> Any:
     from core.model_router import ModelRouter
     from core.model_usage import ModelUsageLedger
 
-    # Две правки одного места, вторая — потому что первой хватило наполовину.
-    # 2026-08-19: `from_env()` шёл БЕЗ леджера, и вызовы Sol на выбор цели были
-    # деньгами, невидимыми в учёте; тогда подключили леджер расхода.
-    # 2026-08-24: замер показал 15 вызовов, видимых в расходе и невидимых для
-    # ПОТОЛКА — резерв и запись стоимости стоят под `budget_ledger is not None`.
-    # Поэтому здесь строится ровно та же связка, что в `app/bootstrap.py`:
-    # `from_env` за сессионными лимитами и бюджет за суточным и недельным.
+    # Same pairing as app/bootstrap.py: the cap applies only when the usage ledger carries a
+    # budget_ledger (reserve and cost recording are skipped without one).
     budget_ledger = BudgetLedger.from_env(
         path=workspace / DEFAULT_BUDGET_LEDGER_PATH,
         config_path=workspace / "config" / "budget_limits.json",
@@ -1097,17 +822,9 @@ def _charter_goal_router(workspace: Path) -> Any:
 def _free_stranded_rows(
     task_store: Any, *, lock: Any, workspace: Path, dry_run: bool = False
 ) -> None:
-    """Startup-only, under the lock: return rows nothing else can free.
+    """Startup only, under the lock: free orphaned rows and resumable paused work.
 
-    Two resting states, one contract — see docs/CODE_NOTES.md, "Rows nothing
-    frees" (MIR-039 / MIR-040 for the orphan half).
-
-    ``dry_run`` carries the tick's own promise one step further than the first
-    remediation pass did. The burn-in review (2026-09-17) found this call site
-    passing no flag, one line above the sweep that had just been taught the
-    flag. The line is drawn at reversibility, by the owner's word: a dry pass
-    still re-queues an orphan that has attempts left, and no longer buries one
-    that does not — a terminal ``failed`` is a verdict nothing takes back.
+    A dry run still re-queues an orphan with attempts left but never finalises one as failed.
     """
     from core.task_lifecycle import reactivate_resumable_work, recover_orphaned_tasks
 
@@ -1135,21 +852,10 @@ def _free_stranded_rows(
 
 
 def _sweep_episodic_duplicates(workspace: Path, *, dry_run: bool = False) -> int:
-    """Collapse byte-identical episodes; return how many rows were dropped.
+    """Collapse byte-identical episodes (newest kept); return how many rows were dropped.
 
-    Exactly ONE of MIR-131's thirteen CLI-only maintenance actions crosses to
-    the unattended path, and the line is drawn on judgement: duplicate collapse
-    is mechanical (keeps the newest of an identical group, loses nothing),
-    while staleness pruning decides which memories are WORTH keeping — the
-    resolver-seat hazard MIR-128 records. Widening this sweep is a decision,
-    not a refactor. Full account: docs/CODE_NOTES.md, "The sweep the tick owns".
-
-    ``dry_run`` propagates the tick's own promise. The burn-in audit
-    (2026-09-17) found this call site passing no flag at all, so a run that
-    announced itself as dry still deleted rows — an irreversible change inside
-    a pass whose whole contract is that it changes nothing. The count is still
-    measured and journalled in dry-run, because "what WOULD have been removed"
-    is exactly what the shadow mode elsewhere in this tick reports.
+    The one CLI-only maintenance action allowed unattended, because it is mechanical; a dry
+    run still counts and journals what would be dropped.
     """
     try:
         from core.episodic_hygiene import collapse_duplicate_episodes
@@ -1157,8 +863,7 @@ def _sweep_episodic_duplicates(workspace: Path, *, dry_run: bool = False) -> int
         from core.smart_memory import EpisodicMemoryStore, ProceduralMemoryStore
 
         store = EpisodicMemoryStore(path=workspace / DATA_DIR / "episodic_memory.jsonl")
-        # Anchors of procedure credit are never collapsed away (MIR-128;
-        # проверка 16.11, средняя).
+        # Episodes that procedures cite as credit are never collapsed away.
         procs = ProceduralMemoryStore(workspace / DATA_DIR / "procedural_memory.jsonl")
         dropped = collapse_duplicate_episodes(
             store, dry_run=dry_run, keep_ids=cited_episode_ids(procs, store),
@@ -1178,37 +883,13 @@ def _sweep_episodic_duplicates(workspace: Path, *, dry_run: bool = False) -> int
 
 
 class BudgetConfigMissing(RuntimeError):
-    """Живой тик запущен там, где денежного потолка нет вовсе."""
+    """A live tick started where no spending cap is configured at all."""
 
 
 def _require_budget_config(workspace: Path) -> None:
-    """Отказать безнадзорному тику, если файла лимитов нет.
+    """Refuse an unattended tick when the budget limits file is missing (zero limits mean none).
 
-    H-33 в docs/audit/HISTORICAL_FAILURE_LEDGER.md. Замер 2026-08-24: весь
-    денежный потолок агента держится на ОДНОМ файле — лимитов в окружении нет
-    ни одного, — и при его отсутствии окна остаются с нулевыми пределами:
-    `reserve` пропускает 500 вызовов подряд, молча. Тот же файл с ПОРЧЕНЫМ
-    содержимым бросает. То есть из двух ошибок настройки тихо проходила ровно
-    та, что СНИМАЕТ ограничение.
-
-    Проверка стоит здесь, а не в `budget_ledger`: путь к конфигу называют все
-    вызывающие по умолчанию, поэтому «назван» там не значит «оператор его
-    завёл» — попытка различить это на слое библиотеки покраснила 168 тестов и
-    правильно сделала. Ожидание «потолок настроен» принадлежит живому входу.
-
-    Переменная `AGENT_BUDGET_CONFIG_PATH` уважается: она и есть законный
-    способ держать лимиты в другом месте.
-
-    ГДЕ ОНА СТОИТ, и это третья попытка. Слой библиотеки отпал: путь к конфигу
-    называют все вызывающие, и различение «назван/существует» покраснило
-    168 тестов. `run_tick` отпал: его зовут напрямую 17 тестов на временных
-    папках. Условие «есть ключ» отпало тоже — ключ живёт в оболочке
-    разработчика, и тесты его наследуют.
-
-    Настоящая граница — ВХОД ПРОЦЕССА. Плановый безнадзорный тик всегда
-    приходит через `main()`; тесты зовут `run_tick` внутри себя. Проверка
-    поэтому стоит в `main()`, и разделяет она ровно то, что разделяет
-    реальность, а не то, что удобно назвать.
+    Called at process entry, not in run_tick or the ledger, which tests use without the file.
     """
     named = os.environ.get("AGENT_BUDGET_CONFIG_PATH", "").strip()
     path = Path(named) if named else workspace / BUDGET_CONFIG_PATH
@@ -1224,25 +905,12 @@ def _require_budget_config(workspace: Path) -> None:
 
 
 def _take_daily_snapshot(workspace: Path) -> None:
-    """Снять суточный снимок состояния, если сегодняшнего ещё нет.
-
-    H-51 в docs/audit/HISTORICAL_FAILURE_LEDGER.md, решение оператора
-    2026-08-25. Замер того дня: 19 живых хранилищ из 24 не имели НИ ОДНОЙ
-    копии — среди них журнал бюджета и ящик одобрений, — а `data/` исключён из
-    git, то есть версионный контроль запасным путём не является.
-
-    Зовётся КАЖДЫЙ тик, а работает раз в сутки: идемпотентность живёт в самом
-    снимке, а не в расписании, потому что расписание — ещё одно место, где
-    можно ошибиться.
-
-    Никогда не роняет тик. Снимок — страховка; страховка, способная остановить
-    работу, хуже её отсутствия.
-    """
+    """Take today's state snapshot unless it exists; called every tick, never breaks it."""
     try:
         from scripts.snapshot_state import take_snapshot
 
         target, copied, pruned = take_snapshot(workspace)
-    except Exception as exc:  # noqa: BLE001 — страховка не вправе ронять тик
+    except Exception as exc:  # noqa: BLE001 — a backup must never break the tick
         _log_tick(workspace, {"event": "state_snapshot_failed",
                               "error": f"{type(exc).__name__}: {exc}"[:200]})
         return
@@ -1257,8 +925,7 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
     _ensure_env_loaded(workspace)
     _take_daily_snapshot(workspace)
 
-    # Full-suite budget; the basis lives with DEFAULT_TIMEOUT_SECONDS in
-    # tools/run_tests.py. RunTestsTool reads this when given no explicit value.
+    # Full-suite test budget read by RunTestsTool (basis: tools/run_tests.py).
     os.environ.setdefault("AGENT_TEST_TIMEOUT_SECONDS", "900")
 
     # Lazy import after dotenv so env vars are available
@@ -1285,9 +952,7 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
         "tasks_processed": 0,
         "tests_result": None,
         "tests_health": "none",
-        # Honest per-task test verdict, kept SEPARATE from run_status. Values:
-        # "none" | "done" | "failed" | "inconclusive" | "skipped". A timed-out /
-        # exit_code-less run is "inconclusive", never silently "done".
+        # Per-task test verdict, separate from run_status; a timed-out run is "inconclusive".
         "result_status": "none",
         "repair_proposed": False,
         "self_build_status": "none",
@@ -1295,18 +960,13 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
         "error": None,
     }
 
-    # Dry-run visibility (observability only — never changes behaviour). Read
-    # the PREVIOUS heartbeat before overwriting it so the streak is accurate.
-    # Extraction lives here (impure I/O); the helper itself stays pure.
+    # Read the previous heartbeat before it is overwritten, so the dry-run streak carries over.
     _prev_hb = _read_heartbeat(workspace)
     try:
         _prev_streak = max(0, int((_prev_hb or {}).get("dry_run_streak", 0) or 0))
     except (TypeError, ValueError):
         _prev_streak = 0
-    # At tick_start no work has happened yet, so carry the streak forward
-    # (did_work=False). The final tick_complete recomputes it once we know
-    # whether this tick actually ran a dry-run pass. An idle no-op or an early
-    # crash therefore never inflates the dry-run-stall signal.
+    # No work yet: carry the streak; tick_complete recomputes it.
     visibility = _dry_run_visibility(
         dry_run=dry_run,
         previous_streak=_prev_streak,
@@ -1315,8 +975,7 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
     )
     summary.update(visibility)
 
-    # Heartbeat #1: record that a tick STARTED before doing any work. Even if
-    # the tick later crashes, the liveness file proves the daemon is running.
+    # Heartbeat before any work: liveness is recorded even if the tick crashes later.
     _write_heartbeat(
         workspace,
         {"event": "tick_start", "tick_start": tick_start, "dry_run": dry_run,
@@ -1326,10 +985,8 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
     # Bound before the try so the error path can always release it.
     _consumer_lock: SingleInstanceLock | None = None
     try:
-        # ── 0. Budget kill-switch gate (TD-022) ───────────────────────────────
-        # Safety-by-default: if the persistent DAY budget is exhausted, skip all
-        # LLM-heavy work this tick. Checked before the scheduler/agent are even
-        # built so no planner/synthesizer/provider call can happen.
+        # ── 0. Budget kill-switch gate ────────────────────────────────────────
+        # Day budget spent: skip all model work, checked before anything is built.
         kill_switch = _check_budget_kill_switch(workspace)
         if kill_switch.active:
             ks_payload = kill_switch.to_dict()
@@ -1365,12 +1022,8 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
         _log_tick(workspace, {"event": "scheduler_tick", **tick_report.to_dict()})
 
         # ── 2. Claim and run pending tasks ────────────────────────────────────
-        # Draining the queue happens under the single-instance lock. Two things
-        # depend on it: no second consumer may claim the same task, and startup
-        # recovery may only reclaim an abandoned row when nothing else can be
-        # holding one in flight. If another consumer holds the lock, this tick
-        # skips the drain and does the rest of its work — that is the correct
-        # outcome, not an error.
+        # Drain under the single-instance lock (no double claims, safe startup recovery);
+        # if another consumer holds it, skip the drain and do the rest of the tick.
         _consumer_lock = SingleInstanceLock(workspace / DAEMON_LOCK_PATH)
         try:
             _consumer_lock.acquire()
@@ -1385,13 +1038,9 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
         if _consumer_lock is not None:
             _free_stranded_rows(task_store, lock=_consumer_lock,
                                 workspace=workspace, dry_run=dry_run)
-            # Same slot, same reason: the unattended path generates the most
-            # repeats and was the only path that could not clean them up —
-            # 43 identical episodes accumulated here on 2026-08-16 (MIR-131).
+            # Same slot: the unattended path produces the most duplicate episodes.
             _sweep_episodic_duplicates(workspace, dry_run=dry_run)
-            # `pending()` rather than `list(status="pending")`: it honours
-            # `run_after`, so a task re-queued behind the retry backoff is not
-            # immediately re-run by this consumer.
+            # pending() honours run_after, so a task in retry backoff is not re-run at once.
             pending_tasks = task_store.pending()
 
         if not pending_tasks:
@@ -1417,10 +1066,6 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
                 try:
                     task_store.mark_running(task.id)
                 except TaskAlreadyClaimed:
-                    # Until 2026-08-04 this caught `Exception` and the comment
-                    # claimed it meant "already claimed" — but `mark_running`
-                    # never refused a second claim, so the guard was decorative
-                    # and two consumers did run the same task.
                     _log_tick(workspace, {"event": "task_claim_lost",
                                           "task_id": task.id})
                     continue
@@ -1436,16 +1081,11 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
                     config = dataclasses.replace(config, dry_run=True)
 
                 try:
-                    # Heartbeat while the run happens, so a killed process is
-                    # distinguishable from a slow one and startup recovery can
-                    # act without risking a double run (MIR-040).
+                    # Heartbeat during the run: recovery tells a killed process from a slow one.
                     with task_heartbeat(task_store, task.id):
                         run_report = runtime.run(config)
                 except Exception as exc:   # noqa: BLE001
-                    # Previously this escaped to the outer handler, which wrote
-                    # an error heartbeat and returned WITHOUT touching the task —
-                    # leaving it `running` forever with nothing in the live
-                    # system able to recover it (MIR-039 + MIR-040).
+                    # Settle the task here, or it stays `running` with nothing to recover it.
                     failed, decision = apply_run_exception(
                         task_store, task.id, exc
                     )
@@ -1462,7 +1102,7 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
 
                 summary["tasks_processed"] += 1
 
-                # Per-task honest verdict (kept distinct from run_status below).
+                # Per-task verdict, distinct from run_status.
                 task_result_status = "none"
 
                 # Record test outcomes
@@ -1492,8 +1132,7 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
                         summary["tests_health"] = _classify_test_health(
                             summary["tests_result"]
                         )
-                        # The runtime already classified done/failed/inconclusive;
-                        # propagate it verbatim as the result_status of this task.
+                        # The runtime already classified it (done/failed/inconclusive).
                         task_result_status = task_report.status
                         summary["result_status"] = task_report.status
                         if task_report.status == "failed":
@@ -1505,8 +1144,7 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
                             )
                             _log_tick(workspace, {"event": "repair_attempt", **repair_result})
                         elif summary["tests_health"] == "inconclusive":
-                            # Do NOT propose a repair (no specific failing test),
-                            # but never let this pass silently as healthy.
+                            # No repair (no failing test to target), but never silently healthy.
                             _log_tick(
                                 workspace,
                                 {
@@ -1516,11 +1154,8 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
                                 },
                             )
 
-                # One shared mapping with the CLI/campaign consumer: completed →
-                # done, blocked-on-approval → blocked, stopped → failed with the
-                # stop reason. The unconditional `mark_done` this replaces
-                # recorded a budget-stopped or approval-blocked run as a success
-                # (MIR-039).
+                # Shared with the CLI/campaign consumer: completed -> done, approval-blocked ->
+                # blocked, stopped -> failed with the stop reason.
                 updated, decision = apply_run_outcome(
                     task_store,
                     task.id,
@@ -1528,11 +1163,8 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
                     stop_reason=run_report.stop_reason,
                     report=run_report.to_dict(),
                 )
-                # run_status = did the run finish (completed); result_status =
-                # what the work actually established (done/failed/inconclusive);
-                # task_status = where the queue row ended up. Three axes, kept
-                # apart on purpose. mode/processed_effects make it explicit that
-                # a dry-run task applied nothing.
+                # Three axes kept apart: run_status (did it finish), result_status (what it
+                # established), task_status (where the queue row ended up).
                 _log_tick(workspace, {"event": "task_done", "task_id": task.id,
                                       "run_status": run_report.status,
                                       "task_status": updated.status,
@@ -1542,18 +1174,13 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
                                       "effects": summary["effects"],
                                       "processed_effects": summary["processed_effects"]})
 
-        # The queue is drained; nothing below claims tasks, so hand the
-        # single-instance lock back before the slower producer work.
+        # Drained: release the lock before the slower producer work (nothing below claims tasks).
         if _consumer_lock is not None:
             _consumer_lock.release()
             _consumer_lock = None
 
-        # ── 3. Autonomous self-build producer (TD-026) ────────────────────────
-        # At most one proposal per tick, gated by a persistent cooldown that runs
-        # BEFORE any agent is built. Producer owns kill-switch/budget/approval/
-        # dirty-tree gates; this only adds cooldown. It NEVER applies/commits/
-        # pushes and NEVER runs the self-apply lane — it only proposes into the
-        # human-gated approval inbox (safe in dry-run too).
+        # ── 3. Autonomous self-build producer ─────────────────────────────────
+        # At most one proposal per tick, into the human-gated inbox; it never applies anything.
         producer_inbox = ApprovalInbox(path=workspace / APPROVAL_INBOX_PATH)
         self_build = _maybe_produce_self_build(
             workspace, producer_inbox, dry_run=dry_run
@@ -1567,9 +1194,7 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
         summary["inbox_pending_after"] = len(inbox_check.pending())
 
     except Exception as exc:  # noqa: BLE001
-        # Release before reporting: a crashed tick must not leave the queue
-        # locked for the next one. (The OS would release it when this process
-        # exits, but run_tick is also called in-process.)
+        # Release before reporting: run_tick also runs in-process, so process exit is no help.
         if _consumer_lock is not None:
             try:
                 _consumer_lock.release()
@@ -1593,9 +1218,7 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
         return 1
 
     summary["tick_end"] = _now_iso()
-    # Recompute the streak now that we know whether this tick did real work.
-    # mode/effects/processed_effects are unchanged by did_work; only the streak
-    # differs: a working dry-run pass increments, an idle no-op carries forward.
+    # Recompute the streak now that did_work is known.
     visibility = _dry_run_visibility(
         dry_run=dry_run,
         previous_streak=_prev_streak,
@@ -1605,22 +1228,8 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
     summary.update(visibility)
 
     # ── Memory maintenance ───────────────────────────────────────────────────
-    # Runs here because this is the path with no human on it: interactively an
-    # operator can type `:hygiene`, unattended nobody will, and memory grows
-    # until someone notices (MIR-045).
-    #
-    # Placed AFTER the work summary so a maintenance problem can never change
-    # the tick's verdict, and gated by AGENT_AUTO_HYGIENE:
-    #   shadow (default) — count and report, remove nothing
-    #   on               — actually remove
-    #   off              — skip entirely
-    # Shadow is the default deliberately: these thresholds have only ever been
-    # exercised against synthetic data, and the pass deletes.
-    #
-    # `on` is the operator's consent to DELETE, not a repeal of `dry_run`. The
-    # burn-in audit (2026-09-17) found the mode variable deciding alone, so an
-    # env var set once could make every "dry" tick destructive. Two permissions
-    # must now agree: the tick must be live AND the mode must say `on`.
+    # AGENT_AUTO_HYGIENE: shadow (default, count only), on (deletes, live ticks only), off.
+    # Runs after the summary so maintenance can never change the tick's verdict.
     _hygiene_mode = os.environ.get("AGENT_AUTO_HYGIENE", "shadow").strip().lower()
     if _hygiene_mode in {"shadow", "on"}:
         try:
@@ -1643,18 +1252,16 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
         summary["rule_approved"] = drain_rule_approved_proposals(
             workspace, dry_run=dry_run,
             log=lambda e, p: _log_tick(workspace, {"event": e, **p}),
-            # Один источник истины о стоках: тот же профиль, которым собирается
-            # безнадзорный агент. Урок — долговременная запись и идёт теми же
-            # воротами (ревизия PR #333).
+            # One source of truth for sinks: the unattended agent's own memory profile.
             durable_writes=unattended_memory_profile(workspace)["durable_writes"],
         )
-    except Exception as exc:  # noqa: BLE001 — замыкание петли не вправе ронять тик
+    except Exception as exc:  # noqa: BLE001 — closing the loop must not break the tick
         _log_tick(workspace, {"event": "rule_approval_error",
                               "error": type(exc).__name__})
 
     _log_tick(workspace, {"event": "tick_complete", **summary})
 
-    # Heartbeat #2: record successful completion with the honest health verdict.
+    # Heartbeat on completion, with the health verdict.
     _write_heartbeat(
         workspace,
         {
@@ -1681,7 +1288,7 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
     pending = summary["inbox_pending_after"]
     tests   = summary["tests_result"]
     health  = summary["tests_health"]
-    # Honest, machine-greppable visibility line: never implies effects ran.
+    # Greppable mode line; never implies effects ran.
     print(
         f"[agent_tick] mode={summary['mode']} effects={summary['effects']} "
         f"processed_effects={summary['processed_effects']} "
@@ -1740,23 +1347,12 @@ def run_tick(workspace: Path, *, dry_run: bool = True) -> int:
 # ── paced campaign daemon mode ────────────────────────────────────────────────
 
 def _pick_next_charter_goal(workspace: Path) -> Any:
-    """Вернуть ОТЧЁТ о выбранной цели, а не одну её строку.
-
-    Аудит автономности 2026-09-17, находка 4: хартия требует от каждой
-    цели критерий успеха («цель без проверки — желание»), отчёт его несёт,
-    а здесь наружу уезжала одна строка `pick.goal`. Критерий умирал в
-    месте выбора, и исполнителю было НЕЧЕМ судить собственную работу.
-
-    Кампания принимает и строку, и отчёт; пустая строка по-прежнему
-    означает отказ. На уровне модуля, а не внутри пейсера (ревизия PR #346):
-    замыкание по `workspace` было единственной причиной вложенности.
-    """
+    """Return the pick report (goal and success check), or "" when there is no goal."""
     try:
         from core.charter_goal import propose_charter_goal
         router = _charter_goal_router(workspace)
         pick = propose_charter_goal(router.for_role("planner"), workspace)
-    except Exception as exc:  # noqa: BLE001 — смена цели не имеет права
-        # уронить прогон: не вышло — останавливаемся прежним путём.
+    except Exception as exc:  # noqa: BLE001 — a failed goal switch must not crash the run
         print(f"[CHARTER] next goal failed: {type(exc).__name__}: {exc}")
         return ""
     if pick.status != "proposed":
@@ -1768,19 +1364,15 @@ def _pick_next_charter_goal(workspace: Path) -> Any:
     return pick
 
 
-#: Сколько ждать, пока потребность дорастёт до порога. Драйв — величина
-#: времени: «сейчас ничего не нужно» не равно «делать больше нечего».
-#: Живой прогон 2026-09-20 13:29: все наблюдения закрыты, все области только
-#: что пройдены, заявка ждёт человека — выбор цели вернул пусто, и прогон вышел
-#: с кодом 3 через секунду после старта. Предметным драйвам (tau 3 ч) нужно
-#: около десяти минут, чтобы снова перевесить порог.
+# How long to wait for a need to cross the threshold: drives grow with time, so an empty
+# pick is not the end (topic drives need about ten minutes to cross it again).
 _NEED_WAIT_SECONDS = 20 * 60
 
 
 def _wait_for_a_need(workspace: Path, *, pause_seconds: float,
                      budget_seconds: float = _NEED_WAIT_SECONDS,
                      sleep_fn: Any = time.sleep, now_fn: Any = time.monotonic) -> Any:
-    """Первая цель от драйвов; пустой выбор — не конец прогона, а ожидание."""
+    """First goal from the drives; an empty pick means wait, not stop."""
     from core.campaign import goal_pick_attempts
 
     deadline = now_fn() + max(0.0, budget_seconds)
@@ -1800,11 +1392,11 @@ def _wait_for_a_need(workspace: Path, *, pause_seconds: float,
 
 
 def _pick_next_drive_goal(workspace: Path) -> Any:
-    """Следующая цель — от самого сильного драйва (core/drive_goal.py, шаг 3)."""
+    """Next goal from the strongest drive (core/drive_goal.py)."""
     try:
         from core.drive_goal import propose_drive_goal
         pick = propose_drive_goal(_charter_goal_router(workspace).for_role("planner"), workspace)
-    except Exception as exc:  # noqa: BLE001 — смена цели не роняет прогон
+    except Exception as exc:  # noqa: BLE001 — a goal switch never crashes the run
         print(f"[DRIVES] next goal failed: {type(exc).__name__}: {exc}")
         return ""
     if pick.status != "proposed":
@@ -1837,19 +1429,10 @@ def run_paced_campaign(
     build_agent_fn: Callable[[Path], Any] | None = None,
     drain_fn: Callable[..., Any] | None = None,
 ) -> int:
-    """Run ONE long, PACED autonomous campaign as a single daemon process.
+    """Run one long, paced campaign in this process, with a heartbeat per cycle.
 
-    Unlike :func:`run_tick` (a single bounded pass driven externally by Task
-    Scheduler), this drives the multi-cycle campaign loop itself over real
-    wall-clock time: it sleeps ``cycle_pause_seconds`` between cycles and stops
-    at ``max_wall_clock_seconds``. Crucially it emits a heartbeat PER CYCLE so
-    the operator's ``--status`` view shows liveness throughout a multi-hour
-    unattended run instead of going dark between the start and the end.
-
-    Dry-run by default; effects still flow only through the existing approval
-    gate inside the campaign. The heavy collaborators (heartbeat writer, the
-    campaign loop, agent builder) are injectable so the wiring is testable with
-    deterministic fakes. Returns an exit code (0 = ok, 1 = hard error).
+    Unlike run_tick it drives the cycles itself over wall-clock time; dry run by default, and
+    effects still pass the campaign's approval gate. Returns 0 (ok) or 1 (hard error).
     """
     from core.campaign import (
         CampaignConfig,
@@ -1864,10 +1447,7 @@ def run_paced_campaign(
     drain = drain_fn or drain_and_log
 
     def _on_cycle(snapshot: dict) -> None:
-        # Liveness during a long paced run. A heartbeat-write failure (e.g. a
-        # transient disk error) must NEVER kill a multi-hour campaign, so the
-        # per-cycle write is best-effort at this daemon layer (the core seam
-        # in run_campaign stays pure).
+        # Best effort: a heartbeat write failure must never kill a multi-hour campaign.
         payload = {
             "event": "campaign_cycle",
             "dry_run": dry_run,
@@ -1879,8 +1459,7 @@ def run_paced_campaign(
             write_heartbeat(workspace, payload)
         except (OSError, TypeError, ValueError):
             pass
-        # Заявки — после КАЖДОГО цикла, не раз в конце (суточный прогон
-        # 2026-09-19: правка агента ждала бы сутки). Ошибки не выпускает.
+        # Drain approved proposals after every cycle, not once at the end; it never raises.
         if not dry_run:
             drain(
                 workspace, dry_run=dry_run,
@@ -1901,10 +1480,8 @@ def run_paced_campaign(
             max_unproductive_streak=max_unproductive_streak,
             max_goal_switches=max_goal_switches,
             pursue_goal_when_idle=pursue_goal_when_idle,
-            # От драйвов цель — один заход; цель человека (--goal) тоже важнее меню своих дел
-            # (прогон 26.09: 20 циклов, ни один не по цели оператора).
-            # Здесь известна правда: --goal даёт цель человека, драйвы и
-            # хартия — его собственную (см. GOAL_GROUNDS).
+            # --goal is the human's goal, drives and charter give the agent's own (GOAL_GROUNDS).
+            # Drive and human goals go before the agent's own task menu.
             goal_is_self=bool(drive_goals or charter_goals),
             **({"max_idle_streak": 1, "goal_first": True, "goal_action": goal_action}
                if drive_goals else {} if charter_goals else {"goal_first": True}),
@@ -1913,7 +1490,7 @@ def run_paced_campaign(
         print(f"[agent_tick] campaign config error: {exc}", file=sys.stderr)
         return 1
 
-    # Heartbeat #1: prove the campaign process started before any cycle runs.
+    # Heartbeat before any cycle: the campaign process has started.
     write_heartbeat(workspace, {
         "event": "campaign_start",
         "dry_run": dry_run,
@@ -1932,7 +1509,7 @@ def run_paced_campaign(
     else:
         from dotenv import load_dotenv
         load_dotenv(workspace / ".env")
-        ensure_roster_home(workspace)  # дом реестра молчавших (Д5)
+        ensure_roster_home(workspace)  # silent-model roster home
         from app.bootstrap import build_agent
         agent = build_agent(
             workspace, approval_provider=None,
@@ -1950,19 +1527,11 @@ def run_paced_campaign(
         file=sys.stderr,
     )
 
-    # Право сменить исчерпанную цель ВНУТРИ прогона (слово оператора
-    # 2026-09-01). Ворота те же, что на старте: цель выбирает сам агент по
-    # хартии, и хартия так же вправе отказать — отказ означает, что прогон
-    # честно заканчивается, а не обходит правило.
-    #
-    # Замер, из-за которого это понадобилось: узкая инженерная цель
-    # исчерпывается за ОДИН цикл (предложение произведено и ушло ждать
-    # человека), после чего кампания умирала за четыре минуты, повторяя одно и
-    # то же; с широкой целью тот же агент дал 21 полезный цикл из 21.
+    # next_goal replaces an exhausted goal inside the run through the same gate as at the start;
+    # a refusal ends the run honestly.
     def _call_run_campaign(**extra):
-        # Старая сигнатура без next_goal/opening_spend — прогон идёт без них.
-        # Отбор по сигнатуре, не по TypeError: ошибка изнутри кампании — не
-        # повод запускать её второй раз.
+        # Drop kwargs an older run_campaign lacks; by signature, not TypeError, so an error
+        # raised inside the campaign never runs it twice.
         try:
             params = inspect.signature(run_campaign).parameters
         except (TypeError, ValueError):
@@ -1995,7 +1564,7 @@ def run_paced_campaign(
         )
         return 1
 
-    # Final heartbeat + honest tick-log summary.
+    # Final heartbeat and tick-log summary.
     write_heartbeat(workspace, {
         "event": "campaign_complete",
         "dry_run": dry_run,
@@ -2135,33 +1704,20 @@ if __name__ == "__main__":
         dry = False
 
     goal = args.goal
-    # Критерий успеха цели. Пустая строка = «не назван»: цель из командной
-    # строки приходит без него, и это честное состояние (core/success_check.py).
+    # Goal success check; "" means none named (a --goal arrives without one).
     success_check = ""
     opening_spend = (0, 0)
     if args.campaign and args.charter:
-        # Цель выбирает агент — от хартии; отказ выходит с названными воротами,
-        # а не подменяется целью по умолчанию (см. core/charter_goal.py).
-        # .env грузится ЗДЕСЬ: `load_dotenv` живёт внутри run_tick и пейсера
-        # кампании, то есть ПОЗЖЕ этого блока — и все плановые тики выбирали
-        # цель на модели по умолчанию вместо закреплённой (вскрытие 19:31).
+        # The agent picks its goal from the charter; a refusal exits with the named gate. Load
+        # .env here: run_tick and the pacer load it later, and the pick would use the default model.
         _ensure_env_loaded(ws)
         from core.charter_goal import propose_charter_goal
 
         _charter_router = _charter_goal_router(ws)
-        # Ревизия PR #346: стартовый выбор платный и делается ЗДЕСЬ, до
-        # кампании; мерка снимается вокруг ВСЕХ попыток — отказ стоит столько
-        # же, сколько согласие.
+        # The opening pick is paid for here, before the campaign; spend covers all attempts.
         from core.campaign_io import router_spend, spend_since
         _spend_before = router_spend(_charter_router)
-        # Несколько попыток выбрать цель на СТАРТЕ. Замер 2026-09-01T23:27:
-        # прогон умирал на первой же отвергнутой цели, потому что попытка была
-        # ровно одна — притом внутри прогона право сменить исчерпанную цель уже
-        # есть. Стартовать оказалось труднее, чем продолжать.
-        #
-        # Каждая неудачная попытка ОСТАВЛЯЕТ СЛЕД: запись стены и повод для
-        # причинной лестницы. Тишины здесь быть не должно — иначе выбор снова
-        # станет невидимым для него самого.
+        # Several attempts at the start; each failed one leaves a stop record and an observation.
         pick = None
         from core.campaign import goal_pick_attempts
         attempts = goal_pick_attempts()

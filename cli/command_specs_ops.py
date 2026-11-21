@@ -263,7 +263,7 @@ COMMANDS_OPS: tuple[CommandSpec, ...] = (
         usage="[--run]",
         in_startup_summary=True,
     ),
-    # ── Multi-agent / subagents (bounded — see governance doc) ────
+    # ── Multi-agent / subagents ───────────────────────────
     CommandSpec(
         canonical=":team-plan",
         description="dry-run bounded subagent contracts",

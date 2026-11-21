@@ -1,19 +1,10 @@
-"""Retire the parked checkpoints that predate the resumable-age ceiling.
+"""Retire parked (budget-paused) checkpoints older than the resumable-age ceiling.
 
-WHY THIS EXISTS. `reactivate_paused_checkpoints` gained an upper age bound
-(`_MAX_RESUMABLE_AGE_HOURS`) after the live store was measured on 2026-08-22:
-fourteen `resume_checkpoint` rows stopped by an exhausted budget between
-2026-07-30 and 2026-08-15, revived oldest-first, three per pass. The first
-hours of the unattended week would have gone to re-answering July's chat —
-one goal was literally «Answer the question: привет» — ahead of any work the
-agent would have chosen itself.
+Lists the stale tasks with their goals and marks them failed, so the retirement is a
+visible, backed-up act instead of a side effect of the next tick. Dry run by default;
+--apply writes after backing the store up.
 
-The ceiling alone would retire them on the first tick. This script does it
-BEFORE the run instead, so the retirement is a visible, reviewable, backed-up
-act with the goals written down, rather than a side effect noticed later in a
-log nobody reads. Operator's decision, 2026-08-22: retire all of them.
-
-Dry run by default. `--apply` writes, after backing the store up.
+Usage: python scripts/retire_stale_checkpoints.py [--workspace PATH] [--apply]
 """
 from __future__ import annotations
 
@@ -81,9 +72,7 @@ def main() -> int:
     backup = backup_state_file(path)
     print(f"\nbackup: {backup}")
     stale_ids = {t.id for t in stale}
-    # Under the store's own lock: the daemon may be installed by the time this
-    # is re-run, and a migration that races the tick would be a worse defect
-    # than the one it repairs.
+    # Under the store's own lock: a running daemon tick must not race this rewrite.
     with exclusive_file_lock(store._lock_path):
         store._save_unlocked([
             t.with_updates(status="failed",

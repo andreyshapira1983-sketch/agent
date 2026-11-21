@@ -1,46 +1,4 @@
-"""`convert_file` — программы для файлов клиента, запущенные безопасно.
-
-Зачем. Замер 2026-09-24 на новом сервере: tesseract, LibreOffice, ffmpeg,
-Inkscape, ImageMagick, Ghostscript/poppler и Blender стоят и работают, но
-агенту недоступны — `shell_exec` пускает только git/grep/uv/…, лаборатории
-запрещён subprocess. Скан, «переведи Word в PDF», видео — вне его рук.
-
-Почему не открыть эти программы в `shell_exec`. Каждая исполняет чужой
-файл, а у агента в рабочей папке лежат ключи:
-  * ffmpeg: плейлист HLS/DASH внутри файла открывает любой путь или адрес
-    (CVE-2023-6605) — лечится `-protocol_whitelist` и запретом плейлистов;
-  * LibreOffice: в безоконном режиме макросы и обработчики событий не
-    исполняются, но у форматов длинная история уязвимостей (CVE-2023-6186,
-    CVE-2024-3044) — совет: бесправный пользователь в изолированной папке;
-  * Inkscape: SVG с `xi:include` вставляет в результат содержимое любого
-    локального файла (разбор elttam, «inkscape-xml»), разработчики считают
-    это нормой — вход проверяет вызывающий;
-  * Blender: `.blend` несёт скрипты; `--disable-autoexec` их выключает, но
-    не все (руководство Blender, «Scripting & Security»);
-  * ImageMagick: формат угадывается по содержимому (ImageTragick) — формат
-    называется явно, `png:in.png`.
-
-Устройство (моё инженерное решение по этим источникам):
-  1. Только фиксированные действия (`op`) с фиксированными аргументами —
-     своего аргумента программе не передать.
-  2. Вход — файл ВНУТРИ рабочей папки (не файл ключей), копируется во
-     временную папку; программа работает там ПОД ПОЛЬЗОВАТЕЛЕМ nobody —
-     /root с ключами и кодом ей закрыт системой, а не договорённостью.
-  3. Результат копируется в `converted/` рабочей папки. Ничего не
-     перезаписывается: имя с меткой действия и времени.
-  4. Нельзя сбросить права (не Linux, не root, нет setpriv) — отказ.
-     Открытая дверь без замка хуже закрытой.
-  5. Одно действие нарушает п. 1 сознательно — `blender_script` (слово
-     оператора 24.09). 3D-персонажа нельзя собрать фиксированными
-     аргументами: сцену строит СВОЙ скрипт агента, а Blender исполняет его
-     полным Python (руководство, «Scripting & Security»). Держит его та же
-     песочница: nobody, временная папка, свой таймаут; /root с ключами и
-     кодом ему закрыт. Сеть песочница не закрывает — изоляция процесса, а не
-     контейнер; это цена двери, названная оператору до решения. Результаты —
-     всё, что скрипт положил в out/ (с подпапками), под своими именами.
-
-Риск: reversible — создаёт новые файлы в `converted/`, чужого не трогает.
-"""
+"""convert_file tool: run fixed file-conversion programs on a workspace file in a sandbox."""
 from __future__ import annotations
 
 import os
@@ -64,7 +22,7 @@ _TIMEOUT = {"ocr": 300, "office": 180, "pdf_pages": 180, "pdf_text": 180, "image
             "svg": 120, "media": 600, "render3d": 600, "blender_script": 900}
 
 _IMAGE_IN = ("png", "jpg", "jpeg", "tif", "tiff", "bmp", "webp", "gif")
-#: Вход и выход каждого действия. Всё прочее — отказ до запуска.
+#: Allowed input and output formats per op; anything else is refused before running.
 OPS: dict[str, dict[str, tuple[str, ...]]] = {
     "ocr": {"in": (*_IMAGE_IN, "pdf"), "to": ("txt",)},
     "office": {"in": ("doc", "docx", "odt", "rtf", "txt", "html", "htm", "xls", "xlsx", "ods",
@@ -77,18 +35,17 @@ OPS: dict[str, dict[str, tuple[str, ...]]] = {
               "to": ("mp4", "webm", "mp3", "wav", "gif")},
     "render3d": {"in": ("blend",), "to": ("png",)},
     "pdf_text": {"in": ("pdf",), "to": ("txt",)},
-    # Свой скрипт агента; результаты — что скрипт сам положил в out/.
+    # The agent's own script; results are whatever it saved into out/.
     "blender_script": {"in": ("py",), "to": ("out",)},
 }
 _OCR_LANGS = ("rus", "eng", "rus+eng")
-#: SVG, которые нельзя отдавать Inkscape: подключение файлов, сущности,
-#: ссылки наружу (всё, кроме якоря «#…» и встроенного data:).
+#: SVG that is never given to Inkscape: file includes, entities, links outside itself.
 _SVG_DANGER = re.compile(r"xi:include|<!ENTITY|<!DOCTYPE|XInclude", re.IGNORECASE)
 _SVG_HREF = re.compile(r"""(?:xlink:)?href\s*=\s*["']\s*([^"']*)""", re.IGNORECASE)
 
 
 class ConvertRefused(ValueError):
-    """Отказ до запуска программы — с причиной, которую видит агент."""
+    """Refusal before any program runs, with a reason the agent sees."""
 
 
 def _check_args(op: str, path: str, to: str | None, lang: str | None) -> tuple[str, str]:
@@ -112,7 +69,7 @@ def _check_args(op: str, path: str, to: str | None, lang: str | None) -> tuple[s
 
 
 def svg_refusal(text: str) -> str | None:
-    """Причина не отдавать SVG программе, или None."""
+    """Reason not to pass this SVG to a program, or None."""
     if _SVG_DANGER.search(text):
         return "SVG includes files or declares entities (xi:include / DOCTYPE / ENTITY)"
     for href in _SVG_HREF.findall(text):
@@ -124,7 +81,7 @@ def svg_refusal(text: str) -> str | None:
 
 def _argv(op: str, ext: str, to: str, *, lang: str, width: int | None, max_pages: int,
           max_seconds: int | None) -> list[list[str]]:
-    """Команды для одного действия; вход всегда `in.<ext>`, выход — в `out/`."""
+    """Commands for one op; input is always `in.<ext>`, output goes to `out/`."""
     src = f"in.{ext}"
     if op == "ocr":
         if ext == "pdf":
@@ -149,18 +106,17 @@ def _argv(op: str, ext: str, to: str, *, lang: str, width: int | None, max_pages
         return [["ffmpeg", "-nostdin", "-loglevel", "error", "-protocol_whitelist", "file",
                  "-i", src, *limit, "-y", f"out/result.{to}"]]
     if op == "blender_script":
-        # Порядок важен: Blender исполняет аргументы по порядку (руководство,
-        # «Command Line Arguments»), и --python-exit-code после --python уже не
-        # действует — упавший скрипт вернул бы 0 и выглядел успехом.
+        # Order matters: Blender applies arguments in order, and --python-exit-code
+        # after --python is ignored, so a failed script would exit 0.
         return [["blender", "--background", "--factory-startup", "--threads", "8",
                  "--python-exit-code", "1", "--python", src]]
-    # render3d: без автозапуска скриптов и без пользовательских настроек.
+    # render3d: no script autorun and no user preferences.
     return [["blender", "--background", "--factory-startup", "--disable-autoexec", src,
              "--render-output", "out/frame_", "--render-format", "PNG", "--render-frame", "1"]]
 
 
 def sandbox_available() -> str | None:
-    """Почему программы запускать нельзя, или None, если можно."""
+    """Why programs cannot be run here, or None when the sandbox is available."""
     if not sys.platform.startswith("linux"):
         return "the sandbox needs Linux"
     if os.geteuid() != 0:
@@ -170,18 +126,19 @@ def sandbox_available() -> str | None:
     return None
 
 
-#: Результаты, чей текст отдаётся прямо в выводе инструмента.
+#: Result types whose text is returned directly in the tool output.
 _TEXT_RESULTS = frozenset({"txt", "csv", "md", "html"})
 
 
 def run_sandboxed(argv: list[str], cwd: Path, timeout: int) -> tuple[int, str]:
-    """Запустить команду пользователем nobody в `cwd`; без оболочки и без ключей."""
+    """Run a command as user nobody in `cwd`: no shell, minimal env without secrets."""
     env = {"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": str(cwd), "TMPDIR": str(cwd),
            "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "OMP_NUM_THREADS": "2"}
     cmd = ["setpriv", f"--reuid={_NOBODY}", f"--regid={_NOBODY}", "--clear-groups",
            "--no-new-privs", *argv]
     try:
-        p = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True,  # noqa: S603 — argv из фиксированных частей
+        # S603: argv is built from fixed parts only.
+        p = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True,  # noqa: S603
                            encoding="utf-8", errors="replace", timeout=timeout, check=False)
         return p.returncode, ((p.stdout or "") + (p.stderr or ""))[-2000:]
     except subprocess.TimeoutExpired:
@@ -189,7 +146,7 @@ def run_sandboxed(argv: list[str], cwd: Path, timeout: int) -> tuple[int, str]:
 
 
 class ConvertFileTool(Tool):
-    """OCR, конвертация документов, страницы PDF, картинки, SVG, видео, 3D."""
+    """OCR, document conversion, PDF pages, images, SVG, media and 3D in a sandbox."""
 
     name = "convert_file"
     description = (
@@ -246,17 +203,12 @@ class ConvertFileTool(Tool):
         result: dict[str, Any] = {"op": op, "input": path, "exit_code": code,
                                   "outputs": outputs, "log_tail": log[-600:]}
         if op == "blender_script":
-            # Хвост журнала Blender — его трассировка при ошибке; пропущенное
-            # (ссылки, чужие файлы, сверх потолков) — названо, а не спрятано.
+            # Blender's log tail carries its traceback; skipped outputs are counted, not hidden.
             result["log_tail"] = log[-2000:]
             result["skipped_outputs"] = getattr(self, "_skipped_outputs", 0)
-        # Текстовый результат — сразу в вывод, не только файлом. 24.09, приёмка
-        # урока 1: Word -> txt лёг в converted/, агент его не дочитал и
-        # заявил «суммы сходятся», не видя одной из сторон сравнения.
+        # Return text results inline too, so the agent reads them, not just a file path.
         if outputs and (op == "ocr" or Path(outputs[0]).suffix.lstrip(".") in _TEXT_RESULTS):
-            # utf-8-sig: LibreOffice пишет txt с меткой порядка байтов U+FEFF, и
-            # сторож внедрений 24.09 счёл её скрытым текстом — вывод Word не
-            # стал уликой, ссылки ответа на его числа остались без опоры.
+            # utf-8-sig: LibreOffice writes a BOM, which the injection guard reads as hidden text.
             text = (self.workspace_root / outputs[0]).read_text(encoding="utf-8-sig", errors="replace")
             result["text"] = text[:_MAX_TEXT_CHARS]
             result["text_truncated"] = len(text) > _MAX_TEXT_CHARS
@@ -265,14 +217,7 @@ class ConvertFileTool(Tool):
         return result
 
     def validate_output(self, output: Any) -> tuple[bool, list[str]]:
-        """Ненулевой код выхода — провал шага, а не «успех с полем error».
-
-        24.09, 18:53: Blender упал на `view_settings.look = 'AgX - Base Contrast'`
-        (журнал сам перечислял допустимые значения), инструмент вернул success,
-        цикл сбоя не увидел — тот же скрипт запущен повторно без правки, а
-        результатом выдано старое видео с диска. Хвост журнала едет в причину:
-        по нему планировщик и карточки ошибок видят, что чинить.
-        """
+        """Fail the step on a non-zero exit, with the log tail as the reason."""
         if not isinstance(output, dict):
             return False, ["convert_file output must be a dict"]
         code = output.get("exit_code")
@@ -299,7 +244,7 @@ class ConvertFileTool(Tool):
         return 0, log
 
     def _collect_tree(self, out: Path, stem: str) -> list[str]:
-        """Результаты своего скрипта — под своими именами в своей папке."""
+        """Collect the script's results under their own names into a new folder."""
         folder = f"{OUTPUT_DIR}/{stem}__blender_script_{time.strftime('%Y%m%d-%H%M%S')}"
         owner = _NOBODY if self._runner is run_sandboxed else None
         picked, self._skipped_outputs = _collect_tree_into(out, self.workspace_root / folder, owner)
@@ -323,19 +268,13 @@ class ConvertFileTool(Tool):
         return saved
 
 
-#: Потолки забора результатов своего скрипта: кадры анимации — сотни файлов.
+#: Limits for collecting script results (animation frames can be hundreds of files).
 _MAX_TREE_FILES = 400
 _MAX_TREE_BYTES = 512 * 1024 * 1024
 
 
 def _collectable(path: Path, owner: int | None) -> bool:
-    """Обычный файл, созданный самим скриптом, — не ссылка и не чужой файл.
-
-    Результаты забирает процесс агента С ПРАВАМИ root. Скрипт в Blender может
-    положить в out/ ссылку на /root/agent-main/.env — копирование прошло бы по
-    ней, и ключи легли бы в converted/. Жёсткую ссылку на чужой файл выдаёт
-    владелец: файлы скрипта принадлежат nobody.
-    """
+    """A regular file owned by the script's user: never a link the root collector would follow."""
     import stat as _stat
 
     info = path.lstat()
@@ -345,7 +284,7 @@ def _collectable(path: Path, owner: int | None) -> bool:
 
 
 def _collect_tree_into(out: Path, dest: Path, owner: int | None) -> tuple[list[Path], int]:
-    """Что забрать из out/ (с подпапками) и сколько файлов пропущено."""
+    """Files to collect from out/ (recursively) and the number skipped."""
     picked, skipped, total = [], 0, 0
     for path in sorted(out.rglob("*")) if out.is_dir() else []:
         if path.is_dir() and not path.is_symlink():
@@ -367,7 +306,7 @@ def _collect_tree_into(out: Path, dest: Path, owner: int | None) -> tuple[list[P
 
 
 def sanitize_args(args: dict[str, Any], idx: int, warnings: list[str]) -> dict[str, Any] | None:
-    """Приём шага плана: обязательные op и path, всё прочее — по списку."""
+    """Sanitize a plan step: op and path are required, other keys are allow-listed."""
     op, path = args.get("op"), args.get("path")
     if not isinstance(op, str) or not isinstance(path, str) or not path.strip():
         warnings.append(f"step[{idx}]: convert_file needs op and path, dropped")
@@ -385,9 +324,6 @@ def sanitize_args(args: dict[str, Any], idx: int, warnings: list[str]) -> dict[s
         warnings.append(f"step[{idx}]: convert_file refused: {exc}; dropped")
         return None
     return {"tool": "convert_file", "arguments": clean,
-            # Метка = имя улики = «file:<исходный файл>», как у file_read: вида
-            # ссылки «convert_file» проверщик не знает, и 24.09 писатель ответа,
-            # не имея чем сослаться, цитировал листинг папки — верные числа
-            # из Word получили «опровергнуто».
+            # Labelled "file:<source>" like file_read; the verifier has no convert_file kind.
             "label": f"file:{clean['path'][:120]}",
             "expected_outcome": "The converted file saved under converted/ (or OCR text)."}

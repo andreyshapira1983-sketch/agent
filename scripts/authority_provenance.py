@@ -1,6 +1,7 @@
-"""Происхождение прав: чьим решением каждое полномочие введено.
+"""Show which commit introduced each agent authority and whether a human decision is named.
 
-Замер, отвергнутые варианты и границы: MIR-155 в docs/audit/MASTER_ISSUE_REGISTRY.md.
+Reads git history and docs/audit/MASTER_ISSUE_REGISTRY.md; run it from the repository root.
+Options: --json prints the raw rows.
 """
 from __future__ import annotations
 
@@ -11,8 +12,7 @@ import re
 import subprocess
 import sys
 
-#: Полномочие -> опознавательный токен решающей строки. Токен выбран так, чтобы
-#: его появление в истории совпадало с появлением самого права, а не файла.
+#: Authority -> token whose first appearance in git history marks the authority itself.
 AUTHORITIES: dict[str, str] = {
     "budget_ledger": "BudgetKillSwitch",
     "approval_inbox": "effects_approved",
@@ -30,11 +30,10 @@ AUTHORITIES: dict[str, str] = {
     "source_registry": "_apply_staleness",
 }
 
-#: Начальный коммит принёс 356 файлов одним куском: всё, что попало в него,
-#: происхождения в записи не имеет вовсе.
+#: The initial commit added everything at once, so it carries no provenance.
 _LUMP_SUBJECT = "Initial commit"
 
-#: Как в реестре выглядит НАЗВАННОЕ решение человека.
+#: How a named human decision is phrased in the registry.
 _HUMAN_DECISION = re.compile(
     r"(operator ruling|решени\w* оператора|слово оператора|оператор реши|"
     r"выбор оператора|operator decision)",
@@ -43,9 +42,8 @@ _HUMAN_DECISION = re.compile(
 
 _REGISTRY = pathlib.Path("docs/audit/MASTER_ISSUE_REGISTRY.md")
 
-#: Машинные попадания, отвергнутые ручной выборкой: ссылка на запись, где
-#: решение человека названо, ещё не значит, что решали ИМЕННО ЭТО право.
-#: Полнота — за машиной, точность — за руками.
+#: Machine matches rejected by hand review: citing an entry that names a human
+#: decision does not mean the decision was about this authority.
 _HAND_REJECTED: dict[str, str] = {
     "procedural_memory": (
         "вводящий коммит ссылается на MIR-044 и MIR-057, но решение оператора "
@@ -64,7 +62,7 @@ def _git(*args: str) -> str:
 
 
 def introducing_commit(token: str) -> tuple[str, str, str] | None:
-    """(хэш, дата, тема) коммита, впервые внёсшего токен, или None."""
+    """(hash, date, subject) of the commit that first added the token, or None."""
     lines = [
         line for line in
         _git("log", "-S", token, "--format=%h|%ad|%s", "--date=short").splitlines()
@@ -81,7 +79,7 @@ def _agent_co_authored(commit: str) -> bool:
 
 
 def _entries_naming_a_human_decision() -> set[str]:
-    """Номера записей реестра, где решение человека НАЗВАНО."""
+    """Registry entry ids whose text names a human decision."""
     if not _REGISTRY.is_file():
         return set()
     text = _REGISTRY.read_text(encoding="utf-8")
@@ -103,8 +101,7 @@ def survey() -> list[dict[str, object]]:
             row.update(origin="токен не найден", commit="", date="", subject="")
         else:
             commit, date, subject = found
-            # Ссылки ищутся во ВСЁМ сообщении, а не только в теме: первый
-            # прогон смотрел тему и потерял единственное попадание.
+            # Search the whole commit message, not only the subject.
             full = _git("log", "-1", "--format=%s%n%b", commit)
             cited = sorted(set(re.findall(r"MIR-\d+", full)))
             row.update(

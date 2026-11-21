@@ -1,16 +1,4 @@
-"""Semantic Scholar Academic Search tool.
-
-Uses the free Semantic Scholar Graph API (api.semanticscholar.org) to return
-peer-reviewed papers with titles, abstracts, authors, year, and ar5iv URLs.
-
-Set SEMANTIC_SCHOLAR_API_KEY in .env for higher rate limits (free key at
-https://www.semanticscholar.org/product/api).
-Without a key the tool retries on 429 with exponential back-off,
-then falls back to DuckDuckGo scoped to semanticscholar.org.
-
-Output per paper:
-  title, url, ar5iv_url, abstract, year, authors, venue, citation_count, source
-"""
+"""`semantic_scholar_search` tool: papers from the Semantic Scholar API, DuckDuckGo fallback."""
 from __future__ import annotations
 
 import os
@@ -62,7 +50,6 @@ class SemanticScholarSearchTool(Tool):
     def __init__(self, default_max_results: int = DEFAULT_MAX_RESULTS) -> None:
         self.default_max_results = default_max_results
 
-    # ------------------------------------------------------------------
     def run(
         self,
         query: str,
@@ -102,7 +89,7 @@ class SemanticScholarSearchTool(Tool):
                 with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:  # noqa: S310 — URL is a constant https base with urlencoded params
                     raw = _json.loads(resp.read().decode("utf-8"))
                 return [_paper_dict(p) for p in raw.get("data", [])]
-            except Exception as exc:  # noqa: BLE001 — reason stated above
+            except Exception as exc:  # noqa: BLE001 — 429 is retried, anything else falls back
                 last_exc = exc
                 code = getattr(exc, "code", None)
                 if code == 429:
@@ -113,21 +100,18 @@ class SemanticScholarSearchTool(Tool):
         # Graceful fallback via DuckDuckGo scoped to semanticscholar.org
         try:
             return self._ddg_fallback(query, n)
-        except Exception:  # noqa: BLE001 — reason stated above
+        except Exception:  # noqa: BLE001 — the fallback failed too: report the API failure
             raise RuntimeError(
                 f"Semantic Scholar API unavailable after retries "
                 f"({type(last_exc).__name__}: {last_exc}). "
                 "Set SEMANTIC_SCHOLAR_API_KEY in .env for a free key."
             ) from last_exc
 
-    # ------------------------------------------------------------------
     def _ddg_fallback(self, query: str, n: int) -> list[dict[str, Any]]:
         try:
             from ddgs import DDGS
         except ImportError as exc:
-            # `from exc` обязательно: без него трассировка теряет исходную
-            # причину, и «пакет не установлен» перестаёт отличаться от сбоя
-            # внутри самого обработчика.
+            # `from exc` keeps "not installed" distinguishable from a failure inside the handler.
             raise RuntimeError(
                 "ddgs package not installed; cannot fall back to DuckDuckGo. "
                 "Install it with: pip install ddgs"
@@ -161,7 +145,6 @@ class SemanticScholarSearchTool(Tool):
             pass
         return results
 
-    # ------------------------------------------------------------------
     def validate_output(self, output: Any) -> tuple[bool, list[str]]:
         if not isinstance(output, list):
             return False, [f"expected list, got {type(output).__name__}"]

@@ -1,11 +1,9 @@
-"""Положить вопрос наставника в канал агента.
+"""Put a mentor question into the agent's channel.
 
-Запуск: PYTHONIOENCODING=utf-8 PYTHONPATH=. python scripts/mentor_ask.py "вопрос"
+Usage: PYTHONIOENCODING=utf-8 PYTHONPATH=. python scripts/mentor_ask.py "question"
 
-Канал несёт ВОПРОСЫ с совещательной властью: агент читает их при выборе целей
-и вправе отклонить. Штатный писатель существует, потому что читатель без
-писателя — механизм, недостижимый ни одним действием (урок MIR-166).
-Разбор и границы: MIR-178.
+The channel carries questions with advisory power only: the agent reads them when
+choosing goals and may decline them.
 """
 from __future__ import annotations
 

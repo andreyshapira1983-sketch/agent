@@ -1,17 +1,4 @@
-"""The agent's own read door into durable memory: a bounded, low-trust search.
-
-Authority change 2026-09-04 (operator, via Кодекс: «чтение памяти как
-low-trust явное извлечение… А так тебя устраивает? Да»). The write door
-(`memory_bank`) opened the same day. Without an explicit read, the exam
-STORE → RETRIEVE → USE cannot be sat: passive injection (`<long_term_memory>`,
-three records keyed on the question) is the loop's choice, not his.
-
-Walls: at most 5 records per call, active store only (the archive is a
-separate authority, MIR-138/156), substring match on content, current
-before superseded (those are marked «замещено»), then newest first,
-every record wrapped with its provenance and the words LOW-TRUST — a memory
-is a claim he once made, not a fact about the world now. Read-only.
-"""
+"""``memory_recall`` tool: bounded, low-trust, read-only search of the agent's durable memory."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -72,8 +59,7 @@ class MemoryRecallTool(Tool):
             return {"term": kwargs["term"], "records": [], "count": 0, "trust": "low",
                     "unavailable": f"{type(exc).__name__}: {str(exc)[:120]}"}
         hits = [r for r in records if needle in str(getattr(r, "content", "")).casefold()]
-        # Current records first, then newest by real time: замещённая запись
-        # выглядела текущей, а str(created_at) путал пояса (проверка 17.11, средняя).
+        # Current records first, then newest by real time (UTC instants, not date strings).
         hits.sort(key=lambda r: (_superseded_by(r) is None, _instant(r)), reverse=True)
         out = []
         for r in hits[:MAX_RECORDS]:

@@ -1,11 +1,4 @@
-"""Approval-inbox, alert-acknowledgement and best-next-action REPL commands.
-
-Split out of ``main.py``. Every function here depends only on ``core`` classes
-and on helpers within this module — never back into ``main`` — so there is no
-import cycle. ``main.py`` re-exports the shared helper ``_approval_inbox_for``
-(used by auto-run / work-session / campaign / operator-digest) and the command
-handlers wired into the REPL dispatch.
-"""
+"""Approval-inbox, alert-acknowledgement and best-next-action REPL commands."""
 from __future__ import annotations
 
 import json
@@ -83,12 +76,7 @@ def _handle_approval_list(rest: str, agent: AgentLoop, workspace: Path) -> bool:
 
 
 def _handle_approval_triage(rest: str, agent: AgentLoop, workspace: Path) -> bool:
-    """Read-only triage of the pending approval inbox.
-
-    Groups pending proposed_task items into clusters, flags duplicates / stale
-    / dangerous / low-value items, and prints a recommended_action per item.
-    Never deletes or executes anything — purely advisory.
-    """
+    """Print an advisory triage of pending approvals; never deletes or executes anything."""
     from core.approval_triage import format_triage_report, triage_inbox
 
     inbox = _approval_inbox_for(agent, workspace)
@@ -99,13 +87,7 @@ def _handle_approval_triage(rest: str, agent: AgentLoop, workspace: Path) -> boo
 
 
 def _handle_best_next_action(rest: str, agent: AgentLoop, workspace: Path) -> bool:
-    """Choose and explain the single most important next action — advisory only.
-
-    Gathers current signals (latest daemon heartbeat + a read-only inbox triage
-    pass) and asks the pure priority-intelligence selector for ONE action, with
-    evidence, risk, and an honest list of what the agent does not know. Nothing
-    is executed.
-    """
+    """Print the single most important next action from current signals; advisory only."""
     import agent_tick
     from core.approval_triage import triage_inbox
     from core.best_next_action import (
@@ -277,10 +259,8 @@ def _handle_self_issue_verify(rest: str, agent: AgentLoop, workspace: Path) -> b
     return True
 
 
-# Авторство агента (утренний груз 2026-08-30): дверь человеческого вердикта.
-# Вердикт помечен retired-by-operator — охрана close_proven_issue его со
-# свидетелем не спутает; у автономного тика дороги сюда нет.
 def _handle_self_issue_retire(rest: str, agent: AgentLoop, workspace: Path) -> bool:
+    """Retire an issue by operator verdict, marked so it is never taken for a fix witness."""
     from core.self_improvement_issues import (
         DEFAULT_ISSUE_PATH,
         SelfImprovementIssueRegistry,
@@ -309,12 +289,7 @@ def _handle_self_issue_retire(rest: str, agent: AgentLoop, workspace: Path) -> b
 
 
 def _handle_alert_ack(rest: str, agent: AgentLoop, workspace: Path) -> bool:
-    """Acknowledge an advisory alert so it stops dominating :best-next-action.
-
-    Usage: ``:ack <action> [--ttl <hours>] [reason words...]``. Only advisory
-    (medium/low) alerts can be acknowledged — objective breakages are rejected.
-    Read/write of runtime state only; never executes the alert's action.
-    """
+    """Acknowledge an advisory alert so it stops dominating :best-next-action."""
     from core.best_next_action import is_suppressible_alert
 
     tokens = rest.split()
@@ -404,19 +379,12 @@ def _handle_alert_ack_clear(rest: str, agent: AgentLoop, workspace: Path) -> boo
     return True
 
 
-#: Операция стоячего гранта. Автомат её ЧИТАЕТ
-#: (`AutonomousRuntime._active_standing_grant`); до MIR-166 её не заводил
-#: никакой боевой путь, только тест.
+#: Read by `AutonomousRuntime._active_standing_grant`.
 STANDING_GRANT_OPERATION = "autonomous_runtime.standing_grant"
 
 
 def _handle_standing_grant(rest: str, agent: AgentLoop, workspace: Path) -> bool:
-    """`:standing-grant <прогонов в сутки> [часов]` — ПОЛОЖИТЬ заявку.
-
-    Кладёт, а не выдаёт: просьба и разрешение — разные события (MIR-117,
-    правило B, ратифицировано оператором). Открывает грант отдельное слово
-    через `:approval-approve`.
-    """
+    """`:standing-grant <runs per day> [hours]` — file a request; `:approval-approve` opens it."""
     tokens = rest.split()
     usage = "Usage: :standing-grant <прогонов в сутки> [часов, по умолчанию 48]"
     if not tokens:
@@ -429,8 +397,7 @@ def _handle_standing_grant(rest: str, agent: AgentLoop, workspace: Path) -> bool
         print(usage, file=sys.stderr)
         return True
     if runs_per_day <= 0 or hours <= 0:
-        # Ноль прогонов автомат читает как «гранта нет», а нулевой срок — как
-        # истёкший. Молча завести мёртвую заявку хуже, чем отказать.
+        # The runtime reads 0 runs as "no grant" and 0 hours as expired: refuse a dead request.
         print(
             "Границы обязательны: и прогонов в сутки, и часов должно быть больше нуля.",
             file=sys.stderr,
@@ -469,8 +436,7 @@ def _handle_approval_decision(
     *,
     decision: str,
 ) -> bool:
-    # Мост вердиктов (2026-08-19): всё после id — причина рецензента; она
-    # уезжает в approval_outcomes и станет опытом автора заявки.
+    """Approve or deny an item; text after the id is the reviewer's reason for the author."""
     item_id, _, reason = rest.strip().partition(" ")
     reason = reason.strip()
     if not item_id:
@@ -485,8 +451,7 @@ def _handle_approval_decision(
             item = inbox.approve(item_id, reason=reason)
         elif decision == "deny":
             if not reason:
-                # Требование причины живёт в инбоксе; здесь оно объясняется
-                # человеку, а не падает трассой стека.
+                # The inbox also requires a reason; explain it here instead of a traceback.
                 print(
                     "Отказ обязан нести причину: "
                     f":approval-deny {item_id} <почему>",
@@ -522,12 +487,7 @@ def _handle_approval_decision(
 
 
 def _record_producer_approval(workspace: Path, item: Any) -> None:
-    """Best-effort TD-031 ledger recording of an ``approved`` outcome.
-
-    Only records for producer-origin ``self_apply_lane.run`` items, only the
-    ``approved`` outcome (this hook runs on the approve path only), and swallows
-    any registry failure so approval flow is never broken.
-    """
+    """Best effort: record an approved producer-origin self-apply item in the subagent registry."""
     try:
         if getattr(item, "operation", None) != "self_apply_lane.run":
             return
@@ -593,9 +553,7 @@ def _handle_approval_run(rest: str, agent: AgentLoop, workspace: Path) -> bool:
             limit=max(1, int(payload.get("limit", 5))),
             include_tests=_payload_bool(payload.get("include_tests"), default=True),
             learning_limit=max(1, int(payload.get("learning_limit", 5))),
-            # Одобряли ЦЕЛЬ — она и должна выполниться. Умолчание False
-            # оставлено ради заявок, записанных до 2026-08-15: у них поля нет,
-            # и прежнее поведение (health-pass) для них не меняется.
+            # Requests filed before this field existed keep their old meaning (health pass).
             include_goal=_payload_bool(payload.get("include_goal"), default=False),
             include_proposals=_payload_bool(
                 payload.get("include_proposals"), default=False
@@ -610,10 +568,7 @@ def _handle_approval_run(rest: str, agent: AgentLoop, workspace: Path) -> bool:
         workspace=workspace,
         approval_inbox=inbox,
     ).run(config)
-    # MIR-117 (слово оператора 2026-08-27): «да» сгорает ПОПЫТКОЙ — правило
-    # полосы. Прежний ключ `status == "completed"` был токеном «очередь
-    # дочерпана»: прогон, отвергнутый до старта, жёг одобрение, а
-    # остановленный ПОСЛЕ сделанной работы — сохранял его. Обе стороны лгали.
+    # An approval is spent by an attempt, not by a "completed" status.
     if report.attempted():
         executed = inbox.mark_executed(item.id)
         agent.log.log("approval_inbox_executed", executed.to_dict())

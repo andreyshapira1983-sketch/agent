@@ -1,8 +1,4 @@
-"""Tool abstraction and registry.
-
-A Tool is a callable unit with a risk label and a typed `run` method.
-The registry resolves names to instances for the loop.
-"""
+"""Tool abstraction (a callable unit with a risk label) and the name-to-tool registry."""
 from __future__ import annotations
 
 import time
@@ -15,29 +11,17 @@ Risk = Literal["read_only", "reversible", "irreversible", "external"]
 
 
 def require_ascii_identifier(value: str, *, role: str) -> str:
-    """Reject non-ASCII text where this codebase expects an identifier.
+    """Reject non-ASCII text where an identifier (path, argv element, memory tag) is expected.
 
-    Programming identifiers in this agent — file paths, shell argv
-    elements, memory tags — MUST be ASCII. Russian (or any other
-    non-ASCII text) belongs in *content*: the bytes inside a file, the
-    body of a memory note, a web search query. Mixing the two creates
-    encoding surprises on Windows (cp1251 → UTF-8 mojibake) and breaks
-    cross-platform pipelines (cmd.exe argv handling, subprocess env,
-    older filesystems).
-
-    `role` is a short human-readable label used in the exception message
-    (e.g. "file_write path", "shell_exec argv[1]"). Raises
-    `PermissionError` so the tool / sanitiser surfaces a uniform
-    rejection that the policy gate already knows how to log.
+    Non-ASCII belongs in content; in identifiers it causes cp1251 mojibake and argv breakage.
+    Raises PermissionError, which the policy gate already logs; `role` names the field.
     """
     if not isinstance(value, str):
         raise PermissionError(
             f"{role} must be a string, got {type(value).__name__}"
         )
     if not value.isascii():
-        # Build a small hint: show the first offending character so the
-        # user / LLM can see what to fix, but never echo the entire
-        # value (it might be long or contain unrelated data).
+        # Name the first offending character only; never echo the whole value.
         bad = next((ch for ch in value if ord(ch) > 127), "")
         raise PermissionError(
             f"{role} must be ASCII-only; non-ASCII character "
@@ -49,30 +33,12 @@ def require_ascii_identifier(value: str, *, role: str) -> str:
     return value
 
 
-#: Сколько настоящих имён показать в подсказке к отсутствующему пути.
+# How many real names the missing-path hint shows.
 _MAX_HINT_NAMES = 8
 
 
 def truncated_name_hint(workspace_root, target) -> str:
-    """Подсказка к отсутствующему пути: сначала ПРОДОЛЖЕНИЯ имени, потом список.
-
-    Замер 2026-09-23, живой прогон: агент искал `logs/trace_8bdd8f1f06036d05e`
-    и получил «Not found» без объяснения. Полное имя следа —
-    `trace_8bdd8f1f06036d05e7746397e8703202.jsonl`, и в журналах агента оно
-    лежит в ЧЕТЫРЁХ разных длинах: 18 упоминаний урезаны до 19 знаков, 9 — до
-    25, 191 — целиком без расширения, 1 — целиком с расширением. Урезанный
-    шестнадцатеричный хвост невозможно отличить от целого на глаз, поэтому
-    агент берёт обрывок и упирается в «файла нет».
-
-    Перечислять содержимое папки здесь мало: в `logs/` лежит 370 следов, и
-    первые восемь по алфавиту ничего не подсказывают. Решает поиск
-    ПРОДОЛЖЕНИЯ: если в папке есть ровно несколько имён, начинающихся с
-    данного, их и надо назвать — тогда отказ становится починимым в том же
-    ходе, а не потерянным шагом.
-
-    Ошибка, которая не называет причину, заставляет угадывать, и агент
-    угадывает неверно — тот же довод, что у двери памяти и у ворот улик.
-    """
+    """Hint for a missing path: the folder's names that continue the given (truncated) name."""
     from pathlib import Path
 
     try:
@@ -108,10 +74,7 @@ def truncated_name_hint(workspace_root, target) -> str:
                 "хвоста от целого не отличается на вид."
             )
 
-    # Продолжений нет — подсказки нет. Список содержимого папки здесь НЕ
-    # строится нарочно: он уже есть у `file_read._nearest_dir_hint`, и вторая
-    # его редакция другими словами — два прибора об одном, ровно тот класс,
-    # который мы весь день и разбираем. У каждого помощника одна работа.
+    # No continuation, no hint: listing the folder is file_read._nearest_dir_hint's job.
     return ""
 
 
@@ -130,9 +93,7 @@ class Tool(ABC):
     name: str
     description: str
     risk: Risk = "read_only"
-    #: Контракт аргументов словами — имена, типы, допустимые значения. Пусто
-    #: значит «контракт не объявлен», и планировщик угадывает (замер
-    #: 2026-09-03: memory_bank, шесть неверных вызовов подряд).
+    # Argument contract in words (names, types, allowed values); empty means the planner guesses.
     arguments: str = ""
 
     @abstractmethod
@@ -141,30 +102,16 @@ class Tool(ABC):
         raise NotImplementedError
 
     def risk_for(self, arguments: dict[str, Any]) -> Risk:
-        """Argument-dependent risk classification (§5 Action Risk & Reversibility).
+        """Risk class for these arguments; the PolicyGate calls this, default is `self.risk`.
 
-        Most tools have a fixed risk class — `file_read` is always
-        `read_only`, `web_search` is always `read_only`. But some tools
-        (`file_write` is the canonical case) cross a trust boundary
-        depending on what they're asked to do: writing a new file is
-        reversible, *overwriting* an existing file is not.
-
-        Default: return the static `self.risk`. Override to inspect
-        `arguments` and pick a stricter (or laxer) class. The PolicyGate
-        calls this method instead of reading `risk` directly.
+        Override when the arguments decide the class (file_write: overwriting is irreversible).
         """
         return self.risk
 
     def validate_output(self, output: Any) -> tuple[bool, list[str]]:
-        """Tool Result Validation (§5).
+        """Return (is_ok, issues); is_ok=False is a hard failure (a verification error).
 
-        Returns (is_ok, issues):
-          - is_ok=True  -> downstream may consume the output (warnings may still be present)
-          - is_ok=False -> hard failure; loop must treat as verification error
-          - issues      -> human-readable notes (empty list if perfectly clean)
-
-        Default policy: any truthy output is OK, falsy -> hard fail.
-        Tools should override for semantic checks (schema, freshness, emptiness, etc.).
+        Default: None or an empty str/list/dict fails. Override for semantic checks.
         """
         if output is None:
             return False, ["output is None"]
@@ -173,16 +120,10 @@ class Tool(ABC):
         return True, []
 
     def execution_status(self, output: Any) -> str:
-        """Did the work this tool was asked to do actually succeed?
+        """Whether the requested work succeeded; "success" whenever `run` returned.
 
-        Defaults to `success` for any tool whose `run` returned without
-        raising — for most tools, returning IS succeeding. A tool that can
-        complete its own call while the work fails overrides this: shell
-        commands are the case that forced it, where the subprocess starting
-        and the command working are different facts (MIR-010).
-
-        Distinct from `validate_output`, which asks whether the returned
-        object is well-formed. A correct report of a failure is valid.
+        Override when a call can return while its work fails (shell). validate_output asks a
+        different question (is the output well-formed); a correct failure report is valid output.
         """
         return "success"
 
@@ -210,8 +151,8 @@ class Tool(ABC):
             from core.tool_receipts import record_tool_invoke_receipt
 
             record_tool_invoke_receipt(self, call, result)
-        except Exception:  # noqa: BLE001, S110 — reason stated above
-            pass  # receipts must never break tool execution
+        except Exception:  # noqa: BLE001, S110 — receipts must never break tool execution
+            pass
         return result
 
 
@@ -240,7 +181,7 @@ class ToolRegistry:
         )
 
     def argument_contracts(self, *, hidden: frozenset[str] = frozenset()) -> str:
-        """Контракты аргументов объявивших их инструментов — для планировщика."""
+        """Argument contracts of the tools that declare one, for the planner."""
         lines = [
             f"- {t.name}: {t.arguments}"
             for t in self._tools.values()

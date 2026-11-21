@@ -1,30 +1,16 @@
 #!/usr/bin/env python3
-"""Read-only drift check for knowledge/generated/AGENT_ANATOMY.md (TD-029).
-
-This script is intentionally inert. It ONLY:
-  * lists files under core/ (os.listdir),
-  * reads the text of knowledge/generated/AGENT_ANATOMY.md,
-  * prints a report and returns an exit code.
-
-It deliberately does NOT, and must never:
-  * import or execute any agent/core module,
-  * call an LLM/provider or any network,
-  * call git,
-  * write, create, or modify any file.
-
-It verifies that the "Module index" in knowledge/generated/AGENT_ANATOMY.md stays in sync with
-the actual core/ package, so future drift is visible instead of silent.
-"""
+"""Read-only drift check of the core/ module index in knowledge/generated/AGENT_ANATOMY.md."""
 from __future__ import annotations
 
 import os
 import re
 
+# Inert by design: never import agent code, call a model, the network or git, or write a file.
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CORE_DIR = os.path.join(ROOT, "core")
 DOC_PATH = os.path.join(ROOT, "knowledge", "generated", "AGENT_ANATOMY.md")
 
-# Modules that live in core/ but are intentionally excluded from the map index.
+# core/ modules left out of the map index.
 _EXCLUDED = {"__init__"}
 
 

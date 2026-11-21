@@ -1,7 +1,4 @@
-"""Current Time tool — pure read-only clock query.
-
-No arguments, no side effects, no network. Always `read_only` risk.
-"""
+"""Current Time tool — pure read-only clock query."""
 from __future__ import annotations
 
 import time
@@ -38,8 +35,7 @@ class CurrentTimeTool(Tool):
     risk = "read_only"
 
     def __init__(self, *, clock: Any = None):
-        # `clock` is an injection seam for tests — must be a callable
-        # returning a `datetime`. Production uses real wall-clock time.
+        # Test seam: a callable returning a datetime; None means the real clock.
         self._clock = clock
 
     def _now_utc(self) -> datetime:

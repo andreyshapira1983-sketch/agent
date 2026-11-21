@@ -1,9 +1,4 @@
-"""The `:ingest-*` REPL commands: source, project, web topic and RSS feed.
-
-Each handler parses its options, calls the matching `core.ingestion` entry
-point and reports the result. Nothing here plans, edits or reads the Source
-Registry back; a failure is named rather than raised.
-"""
+"""The `:ingest-*` REPL commands: source, project, web topic and RSS feed."""
 from __future__ import annotations
 
 import sys
@@ -26,18 +21,7 @@ if TYPE_CHECKING:
 def _report_ingest_failure(
     agent: AgentLoop, kind: str, exc: BaseException, target: str
 ) -> None:
-    """A failed ingest must survive in the journal, not only on the screen.
-
-    All four ingest handlers printed the exception to stderr and returned
-    `True` — the same value a success returns. So the failure existed for
-    exactly as long as the operator was watching the console: an hour later,
-    reading `logs/*.jsonl`, there was nothing to find. Three other handlers in
-    this same file already journal through `agent.log`; these four did not.
-
-    Wrapped, because the report is best effort and the REPL is not: a logger
-    that raises must not turn a failed ingest into a crashed session. The
-    print below still happens either way.
-    """
+    """Journal a failed ingest; best effort, a raising logger must not crash the REPL."""
     try:
         agent.log.log(
             "ingest_failed",
@@ -68,8 +52,7 @@ def _handle_ingest_source(rest: str, agent: AgentLoop, workspace: Path) -> bool:
             dry_run=dry_run,
             auto_write_memory=auto_write,
         )
-    except Exception as exc:  # noqa: BLE001 - CLI boundary: any ingest
-        # failure is reported and journalled, never allowed to kill the REPL
+    except Exception as exc:  # noqa: BLE001 - CLI boundary: a failure must not kill the REPL
         _report_ingest_failure(agent, "source", exc, str(path))
         print(f"(ingest failed: {type(exc).__name__}: {exc})", file=sys.stderr)
         return True
@@ -94,8 +77,7 @@ def _handle_ingest_project(rest: str, agent: AgentLoop, workspace: Path) -> bool
             dry_run=dry_run,
             auto_write_memory=auto_write,
         )
-    except Exception as exc:  # noqa: BLE001 - CLI boundary: any ingest
-        # failure is reported and journalled, never allowed to kill the REPL
+    except Exception as exc:  # noqa: BLE001 - CLI boundary: a failure must not kill the REPL
         _report_ingest_failure(agent, "project", exc, str(path))
         print(f"(ingest failed: {type(exc).__name__}: {exc})", file=sys.stderr)
         return True
@@ -179,8 +161,7 @@ def _handle_ingest_web(rest: str, agent: AgentLoop, workspace: Path) -> bool:
             dry_run=dry_run,
             auto_write_memory=auto_write,
         )
-    except Exception as exc:  # noqa: BLE001 - CLI boundary: any ingest
-        # failure is reported and journalled, never allowed to kill the REPL
+    except Exception as exc:  # noqa: BLE001 - CLI boundary: a failure must not kill the REPL
         _report_ingest_failure(agent, "web", exc, topic)
         print(f"(ingest web failed: {type(exc).__name__}: {exc})", file=sys.stderr)
         return True
@@ -242,8 +223,7 @@ def _handle_ingest_rss(rest: str, agent: AgentLoop, workspace: Path) -> bool:
             dry_run=dry_run,
             auto_write_memory=auto_write,
         )
-    except Exception as exc:  # noqa: BLE001 - CLI boundary: any ingest
-        # failure is reported and journalled, never allowed to kill the REPL
+    except Exception as exc:  # noqa: BLE001 - CLI boundary: a failure must not kill the REPL
         _report_ingest_failure(agent, "rss", exc, url)
         print(f"(ingest rss failed: {type(exc).__name__}: {exc})", file=sys.stderr)
         return True

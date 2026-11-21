@@ -13,7 +13,7 @@
       "binding_id": "PB1",
       "relationship": "THIS boundary produces the carrier that C2 certifies",
       "produces": "the session_start record of the current evaluation's run journal",
-      "_why_this_edge_is_earned": "measured before it was written: the A2 layered probe showed the :budget-status path opens the FS_WRITE channel that creates logs/run_*.jsonl, and C2's causal closure traced the value in that record to app/bootstrap.py:204 inside this very callable.",
+      "_why_this_edge_is_earned": "measured before it was written: the A2 layered probe showed the :budget-status path opens the FS_WRITE channel that creates logs/run_*.jsonl, and C2's causal closure traced the value in that record to app/bootstrap.py:161 inside this very callable.",
       "resolver": {
         "kind": "python_ast",
         "bridge": "scripts/qm_py_anchor.py",
@@ -80,8 +80,8 @@
         "key": "AGENT_KNOWLEDGE_AUTO_WRITE",
         "default": true,
         "read_at": [
-          "app/bootstrap.py:224 -- into the journal payload",
-          "app/bootstrap.py:288 -- into the AgentLoop constructor"
+          "app/bootstrap.py:179 -- into the journal payload",
+          "app/bootstrap.py:235 -- into the AgentLoop constructor"
         ]
       },
       "report_projection": {
@@ -96,7 +96,7 @@
       },
       "control_projection": {
         "of": "AgentLoop.knowledge_auto_write",
-        "constructed_at": "app/bootstrap.py:268 returns AgentLoop(...), receiving the attribute at :288",
+        "constructed_at": "app/bootstrap.py:215 returns AgentLoop(...), receiving the attribute at :288",
         "_correction": "an earlier edition of this binding called these 'the named consumer', singular, and asserted only the getattr sites. That grouped three physical sites under one contract without proving one, which is precisely what this lab's own granularity clause forbids: a granularity note may group only the physical sites of the SAME value -> SAME consumer-contract pair. The grouping is withdrawn.",
         "regimes": [
           {
@@ -233,7 +233,7 @@
               "status": "FROZEN 2026-08-08 -- three poles proven end to end through the production path. Only the memory WRITER was stubbed; everything between AgentLoop.knowledge_auto_write and the write decision ran for real.",
               "ENABLED": "auto_write_memory=True with two file-kind evidences yielding verified claims -> the writer is REACHED (writer_called=1). The stub's return shape then raises, after the call, which is what was being measured and not more.",
               "DISABLED": "identical claims, auto_write_memory=False -> writer_called=0, memory_skipped=2, and every decision carries policy_id 'auto_write_memory'. The pipeline distinguishes that from 'memory_writer_missing', so the refusal names THIS control value rather than a missing writer.",
-              "WIRE_CUT": "source and report projection held True, only the control delivery cut (app/bootstrap.py:288 default True->False). Graph: S1 FAIL, exit BROKEN. Consequence: report=True, control=False, writer_called=0, memory_skipped=2, policy_ids=['auto_write_memory']. The journal reported True while memory was not written. S1 goes red here because the two structural reads stopped matching; that the journal and the control value must otherwise agree at runtime is not something S1 establishes. Restored byte-identical; report=True, control=True, delivered=True again.",
+              "WIRE_CUT": "source and report projection held True, only the control delivery cut (app/bootstrap.py:235 default True->False). Graph: S1 FAIL, exit BROKEN. Consequence: report=True, control=False, writer_called=0, memory_skipped=2, policy_ids=['auto_write_memory']. The journal reported True while memory was not written. S1 goes red here because the two structural reads stopped matching; that the journal and the control value must otherwise agree at runtime is not something S1 establishes. Restored byte-identical; report=True, control=True, delivered=True again.",
               "path_exercised": "AgentLoop.knowledge_auto_write -> _catalogue_chain conjunct with may_knowledge -> KnowledgePipeline.run(auto_write_memory=...) -> the gate at core/knowledge_pipeline.py:395 -> the memory writer",
               "strongest_justified_statement": "R-B controls ADMISSION TO and INVOCATION OF the memory writer.",
               "established": [
@@ -315,7 +315,7 @@
           "_what_it_catches": "the single-edit case it was written for: change either read's key or default alone and the count falls to one, which is red.",
           "UNPROVEN_by_S1": [
             "equality of the runtime values produced by the two reads",
-            "temporal stability of the environment between the two reads -- they run at app/bootstrap.py:224 and :288, os.environ is process-global and mutable, and nothing pins that it does not change in between",
+            "temporal stability of the environment between the two reads -- they run at app/bootstrap.py:179 and :288, os.environ is process-global and mutable, and nothing pins that it does not change in between",
             "identity of the callable resolved by both _env_bool names at runtime -- the name is resolved at call time and nothing pins it to one function",
             "binding of these two structural reads to the report and control destinations",
             "behavioral equivalence of the report and control projections"

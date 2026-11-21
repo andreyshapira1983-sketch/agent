@@ -3,14 +3,13 @@ import threading
 from core.persistent_memory import ACCEPTED_KINDS_TEXT, memory_door_verdict
 from tools.base import Tool
 
-# Счёт на ПРОЦЕСС, как обещает документация: счёт на экземпляре обнулялся при
-# каждой пересборке реестра (проверка 16.11, мелкая).
+# Counted per process, not per instance: every registry rebuild would reset an instance count.
 _process_count = {"banked": 0}
 _process_lock = threading.Lock()
 
 
 def reset_process_ceiling() -> None:
-    """Обнулить счёт процесса — для тестов."""
+    """Reset the per-process count (for tests)."""
     with _process_lock:
         _process_count["banked"] = 0
 
@@ -22,9 +21,7 @@ class MemoryBankTool(Tool):
         "memory door. The door rejects code, duplicates, hypotheses, and unknown "
         "kinds. A None refusal is NOT an error - it is the gate working as intended."
     )
-    # Контракт аргументов — для планировщика: до 2026-09-03 он видел только
-    # имя и описание, угадывал text/kind/provenance и шесть раз подряд стучался
-    # не тем ключом.
+    # Argument contract for the planner, which otherwise guesses the keys.
     arguments = (
         "text (str: the conclusion itself, plain prose - no code, no backticks), "
         "kind (str: " + ACCEPTED_KINDS_TEXT + "), "
@@ -34,14 +31,11 @@ class MemoryBankTool(Tool):
     # Append-only store; record deletable via delete(record_id)
     risk = "reversible"
 
-    #: Ceiling on banked records per process (authority change 2026-09-04):
-    #: the unattended door is open, and a flood of «insights» is the failure
-    #: the one-day reflection dump already showed (625 records in a day).
+    #: Ceiling on records banked per process: the unattended door is open and must not flood.
     max_writes_per_process = 12
 
     def __init__(self, *, store, policy, max_writes_per_process: int | None = None):
-        """An explicit ``max_writes_per_process`` gives this instance its own
-        budget (tests, embedders); the default shares the process counter."""
+        """An explicit ``max_writes_per_process`` gives this instance its own budget."""
         self._store = store
         self._policy = policy
         self._own_counter = max_writes_per_process is not None
@@ -49,8 +43,7 @@ class MemoryBankTool(Tool):
             self.max_writes_per_process = int(max_writes_per_process)
         self._banked = 0
 
-    # Проверка и трата под одним замком ДО двери: 30 параллельных вызовов
-    # записывали 30 при потолке 12 (проверка 17.11, средняя).
+    # Check and spend under one lock before the door, or parallel calls overshoot the ceiling.
     def _reserve(self) -> bool:
         """Take one slot atomically; False when the ceiling is reached."""
         with _process_lock:
@@ -103,7 +96,7 @@ class MemoryBankTool(Tool):
             "banked": mem_id is not None,
             "mem_id": mem_id,
             "kind": kind,
-            # Причина отказа — для того, кто стучится; None, когда принято.
+            # The refusal reason for the caller; None when accepted.
             "refused_by": refused_by or None,
         }
 

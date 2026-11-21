@@ -116,7 +116,7 @@ in the file named.
 | `core/autonomous_runtime.py:60` | `spawn_subagent` is blocked on the unattended goal path, alongside `python_probe`, `rss_fetch`, `semantic_scholar_search`, `memory_bank`, `journal_append`. Web READ (`web_fetch`, `web_search`) was opened on that path by the operator's word on 2026-09-01 (`data/capability_events.jsonl`, second row); this row said «alongside the network tools» until 2026-09-03 (audit D2). Roles a human wrote in advance may run; a worker the agent decides it needs may not be created |
 | `core/subagent_runner.py:322` | a subagent is a one-shot loop with `memory=None` and `persistent_store=None`. A temporary executor can be created; an employee who accumulates experience cannot |
 | `core/charter_goal.py:2` | the agent picks its campaign goal itself, but the goal must anchor to a verbatim line of a document a human wrote. A one-time human push was replaced by a permanent human push stored in a file |
-| `agent_tick.py:122` | on the unattended path `with_memory=False`, `episodic_replay=False`, and durable writes are restricted to a two-entry allowlist |
+| `agent_tick.py:57` | on the unattended path `with_memory=False`, `episodic_replay=False`, and durable writes are restricted to a two-entry allowlist |
 
 The pattern is not five imposed subagents. It is a layer of
 developer-written heuristics sitting between the mission and the agent's
@@ -204,10 +204,10 @@ Four places construct an agent of their own: `agent_tick.py`, `api/server.py`,
 `main.py`, `app/windows_service.py`, `docker/daemon_loop.py`.
 
 Sharper than the count of sites: **one tick constructs up to three agents** —
-the task-drain agent (`agent_tick.py:946`), the self-build producer
-(`agent_tick.py:680`) and the hygiene agent (`agent_tick.py:1165`) — each with
+the task-drain agent (`agent_tick.py:715`), the self-build producer
+(`agent_tick.py:477`) and the hygiene agent (`agent_tick.py:870`) — each with
 its own trace id and its own independent load of every store, and the campaign
-lane builds a fourth (`agent_tick.py:1352`). So the shape today is not one
+lane builds a fourth (`agent_tick.py:1009`). So the shape today is not one
 agent that drains a queue, keeps house and develops itself; it is several
 temporary cognitive instances working over one heap of shared durable state.
 The full map is in `docs/audit/archive/LIFECYCLE_OWNERSHIP_MAP.md`.
@@ -222,7 +222,7 @@ top of the old one. What is true today is narrower and still enough: each tick
 constructs a NEW in-memory `AgentLoop`, and no continuous owner of working
 state exists between ticks, so continuity must either be reconstructed from the
 durable stores or is lost. On that path it is largely lost —
-`agent_tick.py:122`.
+`agent_tick.py:57`.
 
 On top of that, `app/runtime_cli.py` lets the human choose between `auto-run`,
 `work-session` and `campaign-start`, with flags for tests, reflection, goal

@@ -25,10 +25,8 @@ _RESERVED_TAGS = frozenset({
 def _parse_remember(rest: str) -> tuple[list[str], str]:
     """Parse `:remember [tag,tag] text...` into (tags, content).
 
-    Tags are taken only from an explicit form: a bracketed first token
-    (`[fact] text`, `[a,b] text`) or a bare comma list with no empty and no
-    all-digit part (`a,b text`). Everything else is content and is stored
-    whole: `project Alpha is due`, `Hello, world`, `1,5 litres`.
+    Tags come only from a bracketed first token or a bare comma list with no empty
+    or all-digit part; anything else (`Hello, world`, `1,5 litres`) is content.
     """
     rest = rest.strip()
     if not rest:
@@ -44,8 +42,7 @@ def _parse_remember(rest: str) -> tuple[list[str], str]:
         len(head_parts) < 2 and not bracketed
     ):
         return ["user-approved"], rest
-    # A tag is a label, kept as typed in any script; only the reserved words
-    # are lower-cased, because the write policy matches them by name.
+    # Tags stay as typed; reserved ones are lower-cased to match the write policy.
     tags = [t.lower() if t.lower() in _RESERVED_TAGS else t for t in head_parts]
     return tags, tail.strip()
 

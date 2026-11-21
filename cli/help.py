@@ -1,23 +1,10 @@
-"""Rendering of the operator help page and the REPL startup command summary.
-
-``tests/test_help_render.py`` holds the contract: the rendered page must
-equal a frozen fixture captured from the pre-extraction code, and every
-command in the registry must appear somewhere in the layout -- so a command
-cannot be added to the registry and silently stay out of ``:help``.
-"""
+"""Rendering of the operator help page and the REPL startup command summary."""
 from __future__ import annotations
 
 from cli.command_registry import lookup
 
-# ── layout entry kinds ───────────────────────────────────────────────────────
-#
-# ("cmd", canonical, left, column)
-#     Render as: two spaces, ``left`` (the command and any aliases/usage shown
-#     on that line), padding out to ``column``, then the command's description
-#     taken from the registry.
-# ("raw", text)      -- emitted verbatim.
-# ("blank",)         -- an empty line.
-
+# Entry kinds: ("cmd", canonical, left, column) renders two spaces, left padded to column,
+# then the registry description; ("raw", text) is emitted verbatim; ("blank",) is empty.
 HELP_LAYOUT: tuple[tuple, ...] = (
     ("raw", "Commands:"),
     ("cmd", ":mem", ":mem | :memory", 34),
@@ -240,11 +227,7 @@ BANNER_TOKENS: tuple[str, ...] = (
 
 
 def render_help() -> str:
-    """The full ``:help`` page, without a trailing newline.
-
-    Callers print it (``print(render_help(), file=sys.stderr)``), which supplies
-    the final newline -- matching what ``main.py`` emitted before the extraction.
-    """
+    """The full ``:help`` page without a trailing newline (the caller's print adds it)."""
     out: list[str] = []
     for entry in HELP_LAYOUT:
         kind = entry[0]

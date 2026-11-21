@@ -1,8 +1,4 @@
-"""List Directory tool — sandboxed to the workspace root.
-
-Returns a text listing of files and subdirectories inside a workspace
-directory. Refuses path traversal and non-directory paths.
-"""
+"""``list_dir`` tool: list a workspace directory; refuses paths outside it and non-directories."""
 from __future__ import annotations
 
 from pathlib import Path

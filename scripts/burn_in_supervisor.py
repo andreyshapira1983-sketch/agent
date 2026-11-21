@@ -1,23 +1,12 @@
-"""Внешний принимающий: один шаг опыта, запускаемый ЧЕЛОВЕКОМ.
+"""External adopter: one burn-in step, started by a human from the original checkout.
 
-Запускать из исходного checkout, а не из того дерева, которое агент меняет:
+Usage: python scripts/burn_in_supervisor.py --repo SANDBOX [--sha SHA] [--show] [--next PATH]
 
-    python scripts/burn_in_supervisor.py --repo C:\\path\\to\\sandbox
-
-Что он делает. Берёт последний SHA, предъявленный полосой в реестре
-(`state/burn_in_offers.jsonl`), и отдаёт его `core.burn_in_supervisor.adopt_offer`.
-Тот перепроверяет всё заново — неподвижность имени, предъявление, шаг от головы
-опыта, целость забора — и гоняет ПОЛНУЮ батарею в свежем рабочем дереве на этом
-самом SHA. Голова опыта двигается только после зелёной батареи.
-
-Чего он НЕ делает и делать не может: не трогает `main`, не переставляет ветку
-рабочего дерева, не делает push и не делает merge (список разрешённых глаголов
-git в `core/burn_in_supervisor._VERBS` их не содержит вовсе).
-
-Почему отдельный процесс, а не часть тика. Принимающий обязан быть тем, кого
-изменяемый код изменить не может. Человек стартует его из исходного checkout,
-и по ходу десяти часов он себя не перечитывает; кандидат, трогающий его файл,
-получает отказ по правилу забора. Внутри тика оба свойства были бы утрачены.
+Takes the latest SHA offered in state/burn_in_offers.jsonl (or --sha) and hands it to
+core.burn_in_supervisor.adopt_offer, which re-checks the offer and runs the full test
+battery in a fresh worktree at that SHA; the experiment head moves only on a green
+battery. --show prints the head and pending offers; --next PATH sets up the next
+cycle's worktree at the head. It never touches main, never pushes and never merges.
 """
 from __future__ import annotations
 
@@ -37,19 +26,16 @@ from core.burn_in_supervisor import (
     offer_ledger,
 )
 
-#: Потолок батареи. Десятичасовой опыт не вправе застрять на одном кандидате:
-#: зависшая проверка неотличима от отказа и обязана им стать.
+#: Battery ceiling: a hung check counts as a refusal, so one candidate cannot stall the run.
 _BATTERY_TIMEOUT_SECONDS = 3600
 
 
 def _pending_offers(repo: Path, head: str) -> list[str]:
-    """SHA из реестра, ещё не принятые. Порядок предъявления сохраняется."""
+    """Offered SHAs not yet adopted, in offer order."""
     try:
         lines = offer_ledger(repo).read_text(encoding="utf-8").splitlines()
     except (OSError, UnicodeDecodeError):
-        # `UnicodeDecodeError` — не `OSError` (ревизия PR #337). Без него
-        # реестр, испорченный на уровне байтов, давал трассировку вместо
-        # пустого списка ожидающих.
+        # UnicodeDecodeError is not an OSError; a byte-corrupted ledger means nothing pending.
         return []
     seen: list[str] = []
     for line in lines:
@@ -60,10 +46,7 @@ def _pending_offers(repo: Path, head: str) -> list[str]:
             row = json.loads(line)
         except ValueError:
             continue
-        # Не словарь — тоже законный JSON. `[1, 2]` и `"строка"` разбираются
-        # без ошибки, а `.get` на них даёт `AttributeError`, и внешний
-        # принимающий падает целиком (ревизия PR #334). Одна испорченная
-        # строка не вправе остановить десятичасовой опыт.
+        # Valid JSON may be a list or a string; one bad line must not stop the run.
         if not isinstance(row, dict):
             continue
         sha = str(row.get("sha") or "")
@@ -76,15 +59,8 @@ def _battery(
     worktree: Path, *, timeout_seconds: float = _BATTERY_TIMEOUT_SECONDS,
     env: dict[str, str] | None = None,
 ) -> tuple[bool, str]:
-    """Полная батарея в дереве кандидата. Зелено — значит зелено целиком.
-
-    Ждём через `core/bounded_subprocess`, а не через `subprocess.run(timeout=)`:
-    последний убивает только прямого потомка, после чего `communicate` без
-    потолка продолжает ждать трубу, которую держит внук. Батарея pytest
-    порождает внуков по устройству, а докстринг ограничителя несёт два замера
-    от 2026-09-05 — 30 с превратились в 16 минут, 20 с в 600 с. Зависшая
-    проверка неотличима от отказа и обязана им стать.
-    """
+    """Run the full test battery in the candidate's worktree; a timeout is a refusal."""
+    # Not subprocess.run(timeout=): it kills only the child, and pytest grandchildren hold the pipe.
     stdout, _stderr, code, timed_out = run_with_tree_kill(
         [sys.executable, "-m", "pytest", "-q", "--no-header"],
         cwd=str(worktree),
@@ -111,23 +87,8 @@ def main(argv: list[str] | None = None) -> int:
     repo = Path(args.repo).resolve()
 
     if args.next:
-        # Единственный потребитель указателя опыта, и потому единственное
-        # место, где цепочка принятий превращается в работающий код. Дерево
-        # заводит принимающий: у кода, который сам себя меняет, нет способа
-        # выбрать себе commit, потому что он не выбирает дерево.
-        #
-        # `--sha` здесь протянут насквозь (ревизия PR #335): раньше он молча
-        # пропадал, и `--next --sha <чужой>` заводил дерево на текущей голове
-        # да ещё и выходил с успехом. Сверка, которую можно не заметить, — не
-        # сверка. Отказ печатается словами, а не трассировкой: принимающего
-        # читает человек.
-        #
-        # Голова здесь нарочно НЕ читается заранее (ревизия PR #336): раньше
-        # `experiment_head` звался до разбора глагола, и испорченный указатель
-        # давал трассировку прежде, чем управление доходило до этого
-        # обработчика, — то есть комментарий выше опровергался файлом, в
-        # котором он написан. `materialise_next_cycle` читает голову сам и
-        # делает это под замком, так что читать её здесь было и незачем.
+        # The adopter, not the self-changing code, picks the next cycle's tree.
+        # The head is not read here: materialise_next_cycle reads it itself, under its lock.
         try:
             started = materialise_next_cycle(
                 repo, Path(args.next), sha=args.sha or None,
@@ -139,9 +100,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"дерево: {Path(args.next).resolve()}")
         return 0
 
-    # Тот же отказ словами и на остальных глаголах. Fail-closed чтение головы
-    # завёл PR #335: до него испорченный указатель вообще не был отказом.
-    # Значит трассировку на `--show` и на принятии завёл тот же мой коммит.
+    # A corrupted head pointer is a refusal in words, not a traceback: a human reads this.
     try:
         head = experiment_head(repo)
     except SupervisorError as exc:

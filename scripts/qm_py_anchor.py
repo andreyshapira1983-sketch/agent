@@ -30,18 +30,14 @@ def main(argv: list[str]) -> int:
         for name in (_string(node.args[1]),) if name is not None
     })
 
-    # Attributes read as `self.NAME` anywhere in the module. A consumer that
-    # reads a field off itself is invisible to the getattr fact above, and the
-    # first version of the app.qm binding was silently blind to exactly that.
+    # `self.NAME` reads: a field read off self is invisible to the getattr fact above.
     self_attribute_reads = sorted({
         node.attr for node in ast.walk(tree)
         if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load)
         and isinstance(node.value, ast.Name) and node.value.id == "self"
     })
 
-    # Per-FUNCTION getattr names. Module-wide membership was proved false
-    # protection: two regimes reading the same field from the same module make a
-    # module-scoped assertion survive the removal of either one.
+    # Per-function getattr names: a module-wide set hides the removal of one of two readers.
     getattr_names_by_function = {
         fn.name: sorted({
             nm for sub in ast.walk(fn)
@@ -73,9 +69,7 @@ def main(argv: list[str]) -> int:
         name = _string(node.args[0])
         if name is None:
             continue
-        # A logging call is `something.log("event", {...})`. The bridge does not
-        # care what the receiver is called -- naming it here would put a fact in
-        # the instrument instead of in the .qm file.
+        # A logging call is `x.log("event", {...})`; the receiver name is not checked on purpose.
         payload = node.args[1]
         if not isinstance(payload, ast.Dict):
             continue
@@ -84,10 +78,8 @@ def main(argv: list[str]) -> int:
             k for k in (_string(key) for key in payload.keys) if k is not None
         )
 
-    # Calls inside the anchor whose arguments are all literals, keyed by callee
-    # name. This is what makes "two projections share one source" checkable: if
-    # a field is read twice from one variable with one default, both reads show
-    # up here identically, and changing either one changes the fact.
+    # All-literal calls in the anchor, by callee: lets a .qm file check that two reads
+    # share one source and one default.
     literal_calls: dict[str, list[list[object]]] = {}
     for node in ast.walk(anchor):
         if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):

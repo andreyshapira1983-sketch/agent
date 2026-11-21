@@ -1,11 +1,4 @@
-"""The agent's door to his own routing policy: set or release a role's model.
-
-Operator's word 2026-09-04 22:20 (see core/model_routing_policy.py). The
-tool never sees a key: it names a provider from the allowed pool and a
-model; the trusted router substitutes the credential at call time. Every
-decision needs a reason (secret-free) and is journaled; the roster and the
-usage ledger show it afterwards under ``agent_policy:<id>``.
-"""
+"""model_route tool: the agent sets or releases the model for one of its roles."""
 from __future__ import annotations
 
 from typing import Any
@@ -33,8 +26,7 @@ class ModelRouteTool(Tool):
     #: A route is a reversible decision: the next record supersedes it.
     risk = "reversible"
 
-    #: Ceiling per process: routing is a decision, not a nervous tic. Six
-    #: covers every role once plus one correction.
+    #: Routing changes allowed per process: each of the five roles once plus one correction.
     max_changes_per_process = 6
 
     def __init__(self, *, store: RoutingPolicyStore, max_changes_per_process: int | None = None):

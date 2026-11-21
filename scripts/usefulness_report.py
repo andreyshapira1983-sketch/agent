@@ -1,6 +1,6 @@
-"""Отчёт мерила полезности (core/work_usefulness.py): только чтение.
+"""Read-only report of the usefulness meter (core/work_usefulness.py).
 
-    python scripts/usefulness_report.py                  # сводка по рабочей папке
+    python scripts/usefulness_report.py                  # summary for the workspace
     python scripts/usefulness_report.py --window 3 --examples 5
 """
 from __future__ import annotations

@@ -1,16 +1,4 @@
-"""Broad-except audit for ``core/`` (MIR-077) — read-only classifier.
-
-* ``journaled`` — the handler logs/prints something; * ``reraise`` — the
-handler re-raises; * ``log_guard`` — the TRY body is itself only journaling,
-so a silent handler is the deliberate last-resort guard (the #283/#286 inner
-pattern); * ``silent_noop`` — pass/continue/break only; *
-``silent_default_return`` — a bare default return; * ``silent_other`` —
-swallows and does something else.
-
-A silent handler WITHOUT a nearby comment naming its reason is the audit's
-target class. The pytest ratchet (`tests/test_except_audit_ratchet.py`) pins
-the baseline so the class can only shrink.
-"""
+"""Read-only classifier of broad except handlers; flags silent ones that state no reason."""
 from __future__ import annotations
 
 import ast
@@ -37,32 +25,14 @@ def _is_log_call(n: ast.AST) -> bool:
         f = f.value
     if isinstance(f, ast.Name):
         name = f.id + "." + name if name else f.id
-    # Leading underscores stripped BEFORE matching: a private journaling
-    # helper is journaling. `self._log(...)` used to score as silence, because
-    # the token was `_log` and the match is exact — so five handlers in
-    # `core/autonomous_runtime.py` that do report their failure were counted
-    # in the target class, and the audit sent a reader to fix what was not
-    # broken. Measured 2026-08-05: 46 flagged, 5 of them journaling this way.
-    #
-    # Stripping does not widen the match: `_login`/`_logic` become
-    # `login`/`logic`, neither of which is in `_LOGGY`, so the token rule from
-    # review round #292 still holds — `login()` is not journaling.
+    # Underscores are stripped first, so a private helper like `self._log` is journaling;
+    # `_login`/`_logic` become `login`/`logic`, which still are not.
     parts = [p.lstrip("_") for p in name.lower().split(".")]
-    # `log_error` / `log_summary` are journaling too, and both exist in `core/`.
-    # The prefix is `log_` WITH the separator on purpose: it admits those and
-    # still refuses `login` and `logic`, which is the whole point of #292.
+    # `log_` with the separator admits log_error/log_summary and still refuses login/logic.
     return any(k in parts for k in _LOGGY) or any(p.startswith("log_") for p in parts)
 
 
-#: Helpers that journal on the caller's behalf. A handler calling one of these
-#: DOES report; scoring it silent sends a reader to fix what is not broken.
-#:
-#: `_sensor_failed` is the loop layer's own answer to "an observer must not
-#: break the turn, and must not vanish either" — it delegates to
-#: `core/sensor_journal.py`. The audit matched a literal `.log(` call and so
-#: counted 15 reporting handlers as silent (measured 2026-08-05), which is how
-#: a handler that reports correctly ended up having to carry a justifying
-#: comment to satisfy this very tool.
+#: Helpers that journal on the caller's behalf (`_sensor_failed` -> core/sensor_journal.py).
 _REPORTING_HELPERS = frozenset({"_sensor_failed"})
 
 
@@ -82,8 +52,7 @@ def _has_log_call(node: ast.AST) -> bool:
 
 
 def _broad(handler_type: ast.expr | None) -> bool:
-    """Bare, Exception/BaseException by name, or a tuple containing one
-    (review round #292: `except (ValueError, Exception):` is just as broad)."""
+    """Bare, Exception/BaseException by name, or a tuple containing one of them."""
     if handler_type is None:
         return True
     if isinstance(handler_type, ast.Name):
@@ -93,25 +62,14 @@ def _broad(handler_type: ast.expr | None) -> bool:
     return False
 
 
-#: A linter directive is not a justification — it is the opposite: silencing
-#: the tool that asked for one. Found 2026-08-22 auditing this audit against
-#: the field's named failure for "zero unexplained" reports («the comments
-#: turn out to be fig leaves»): 8 of 127 silent handlers were justified by
-#: nothing but a bare BLE001 suppression, and this instrument counted them as
-#: explained. A directive followed by real prose still counts — it is the
-#: BARE directive that says nothing.
+#: A bare linter directive silences the tool that asked for a reason; it is not a reason.
 _DIRECTIVE_ONLY_RE = re.compile(
     r"^#\s*(?:noqa|type:|pragma|pylint:|mypy:|ruff:)[^#]*$", re.IGNORECASE
 )
 
 
 def _is_bare_directive(text: str) -> bool:
-    """True when a comment carries only tool directives, no reason.
-
-    A directive with an em-dash explanation after it («noqa: BLE001 — memory
-    journaling is optional») is a real justification and is kept: the split is
-    on whether a human wrote WHY, not on whether a marker is present.
-    """
+    """True when a comment carries only tool directives; a directive plus a written why is not."""
     stripped = text.strip()
     if not _DIRECTIVE_ONLY_RE.match(stripped):
         return False
@@ -123,9 +81,7 @@ def _is_bare_directive(text: str) -> bool:
 
 
 def _comment_lines(src: str) -> set[int]:
-    """1-based line numbers that carry a REAL comment token — a '#' inside a
-    string literal is not a comment (review round #292), and a bare linter
-    directive is not a reason (2026-08-22)."""
+    """1-based lines with a real comment token (not a '#' in a string, not a bare directive)."""
     out: set[int] = set()
     try:
         for tok in tokenize.generate_tokens(io.StringIO(src).readline):
@@ -139,8 +95,7 @@ def _comment_lines(src: str) -> set[int]:
 def classify_source(src: str, rel_file: str) -> list[dict]:
     comment_lines = _comment_lines(src)
     out: list[dict] = []
-    # ast.TryStar (except*) handlers are as capable of swallowing as ast.Try
-    # (review round #292).
+    # except* (ast.TryStar) handlers can swallow just like ast.Try ones.
     try_types = (ast.Try, ast.TryStar) if hasattr(ast, "TryStar") else (ast.Try,)
     for node in ast.walk(ast.parse(src)):
         if not isinstance(node, try_types):
@@ -163,10 +118,7 @@ def classify_source(src: str, rel_file: str) -> list[dict]:
                 kind = "silent_default_return"
             else:
                 kind = "silent_other"
-            # The justification may sit on the line ABOVE the except, on
-            # the except line, or anywhere in the handler body — but only a
-            # REAL comment token counts, never a '#' inside a string
-            # (review round #292).
+            # A reason may sit on the line above the except, on it, or in the handler body.
             end = h.end_lineno or h.body[-1].lineno
             commented = any(
                 ln in comment_lines for ln in range(max(1, h.lineno - 1), end + 1)
@@ -183,14 +135,8 @@ def classify_source(src: str, rel_file: str) -> list[dict]:
 def _unconditional_reporters(tree: ast.AST) -> frozenset[str]:
     """Functions in this file that ALWAYS write to the journal when called.
 
-    "Always" is doing the work. A helper that logs only inside an `if` reports
-    on some paths and not others, so a handler delegating to it has not
-    necessarily reported anything — counting it would let a real silence hide
-    behind a conditional. A write inside a `try` body still counts: `try` is not
-    a branch, it runs.
-
-    Nested function definitions are skipped: a closure's log call belongs to the
-    closure, and the outer function may never call it.
+    A write inside an `if` does not count (other paths stay silent); one inside `try`/`with`
+    does. Nested definitions are skipped: a closure's log call belongs to the closure.
     """
     out: set[str] = set()
     for fn in ast.walk(tree):
@@ -217,23 +163,9 @@ def _unconditional_reporters(tree: ast.AST) -> frozenset[str]:
 def journal_silent_handlers(src: str, rel_file: str) -> list[dict]:
     """Handlers that write NOTHING to the journal, per file.
 
-    A different question from `classify_source`, which asks whether a silent
-    handler carries a COMMENT. A comment helps whoever reads the code; it does
-    nothing for an operator reading logs while the agent runs unattended. The
-    census (2026-08-05) traced three consequences of that gap — an answer-safety
-    check whose failure looked like success, a referent resolver that could stop
-    working unnoticed, a task contract silently replaced — and none of the three
-    handlers was uncommented.
-
-    Two exclusions, both structural rather than a matter of taste:
-
-    * a handler that RE-RAISES has reported by the strongest means available;
-    * a handler nested inside another handler that reports is the last-resort
-      guard around reporting itself, and reporting from inside a failed report
-      is a recursion, not a fix.
-
-    Counted here rather than in a throwaway script because two ad-hoc passes
-    over the same layer produced 22 and 18. One implementation, one number.
+    Unlike classify_source, comments do not count: they do not help an operator reading logs.
+    Excluded: handlers that re-raise, guards around a journal write, and handlers nested in
+    one that reports (reporting a failed report would be a recursion).
     """
     tree = ast.parse(src)
     handlers = [n for n in ast.walk(tree) if isinstance(n, ast.ExceptHandler)]
@@ -243,12 +175,7 @@ def journal_silent_handlers(src: str, rel_file: str) -> list[dict]:
         for n in ast.walk(handler):
             if _is_reporting_call(n):
                 return True
-            # A handler that delegates its report to a helper HAS reported. The
-            # rule used to be a literal `.log(` inside the handler, which scored
-            # `_enforce_answer_safety` silent while it was calling
-            # `_safe_answer_after_enforcement_failure`, whose first statement is
-            # the `answer_enforcement_failed` write. Punishing code for moving a
-            # report into a helper is the counter's error, not the code's.
+            # Delegating the report to a local always-journaling helper counts as reporting.
             if (
                 isinstance(n, ast.Call)
                 and isinstance(n.func, ast.Attribute)
@@ -257,12 +184,8 @@ def journal_silent_handlers(src: str, rel_file: str) -> list[dict]:
                 return True
         return False
 
-    # A `try` whose body is nothing but journal writes: the handler guards the
-    # act of reporting, and reporting a failed report is a recursion. Identical
-    # in kind to the nested-handler exclusion below and to `try_only_logs` in
-    # `classify_source` — which is where this rule already lived. It was written
-    # once and not carried across, so `core/loop_run_tail.py:155` counted as a
-    # silence the layer had no way to remove.
+    # A try whose body is only journal writes: its handler guards reporting itself (the same
+    # rule as try_only_logs in classify_source).
     guards_a_write: set[int] = set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.Try):
@@ -295,14 +218,9 @@ def journal_silent_handlers(src: str, rel_file: str) -> list[dict]:
 
 
 def loop_layer_files(root: Path) -> list[Path]:
-    """The loop layer, INCLUDING subsystems extracted out of it.
+    """The loop layer: loop*.py plus modules they import as ``import <pkg>.x as y``.
 
-    A scope written as "files named ``loop*``" measures where someone looked
-    rather than where the defect can be, and census item B1 proved that
-    costs something real: moving `propose_repair` into
-    `core/repair_commands.py` moved one journal-silent handler with it, the
-    budget read one lower, and nothing had been fixed. A refactor must never
-    be able to look like a repair.
+    Extracted parts stay in scope, so moving code out of loop*.py cannot look like a repair.
     """
     files = sorted(p for p in root.glob("loop*.py") if "__pycache__" not in p.parts)
     extracted: set[Path] = set()
@@ -346,21 +264,13 @@ def classify_file(path: Path) -> list[dict]:
     )
 
 
-#: Everything production-shaped. Until 2026-08-22 this audit walked `core/`
-#: only, and MIR-126 measured the cost: of the nine silent handlers it worried
-#: about, exactly ONE was in `core/` — the other eight sat in `app/` and
-#: `cli/`, including all three in `app/budget_guard.py`, the money-adjacent
-#: module its own entry called the worst place for silent degradation. The
-#: instrument worked, reported zero unexplained, and did not look where the
-#: concern was; nothing stated the scope at the point where the number was
-#: read. Same roots as INV-2's production-reachability list.
+#: Every production root (as in INV-2's reachability list); a narrower scope makes the zero lie.
 _AUDIT_ROOTS: tuple[str, ...] = ("core", "cli", "app", "api", "tools")
 
 
 def audit() -> list[dict]:
     rows: list[dict] = []
-    # rglob: subdirectories too (none under core/ today, but the ratchet must
-    # not go blind the day one appears — review round #292).
+    # rglob, so a future subdirectory does not fall outside the ratchet.
     for root in _AUDIT_ROOTS:
         base = REPO / root
         if not base.is_dir():

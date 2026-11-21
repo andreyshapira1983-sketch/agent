@@ -23,8 +23,7 @@ def check(snapshot: str = SNAPSHOT, root: Path = ROOT) -> tuple[int, list[str]]:
     }
     seen: dict[str, list[str]] = {}
     for label, argv in queries.items():
-        # `check=False` on purpose: a non-zero git exit is DATA here — it means
-        # the snapshot is unreadable, which is a verdict, not a crash.
+        # check=False: a git failure means "snapshot unreadable", a verdict, not a crash.
         proc = subprocess.run(  # nosec B603 B607
             argv, cwd=root, capture_output=True, text=True, check=False,
             encoding="utf-8", errors="replace", timeout=120)

@@ -1,35 +1,4 @@
-"""Учение по восстановлению: каждая резервная копия читается и знает, чем она является.
-
-ИСТОРИЧЕСКИЙ КЛАСС (H-12, docs/audit/HISTORICAL_FAILURE_LEDGER.md).
-GitLab.com, 31 января 2017: во время восстановления после инцидента был удалён
-рабочий каталог основной базы, и из ПЯТИ заведённых способов резервирования не
-сработал ни один — часть была настроена неверно, часть не проверялась годами.
-Отчёт называет причину прямо: резервная копия, восстановление из которой никто
-не пробовал, есть не копия, а предположение.
-
-ЧТО ЭТОТ СКРИПТ ДЕЛАЕТ. Прогоняет каждую копию через НАСТОЯЩИЙ загрузчик
-состояния (тот же, что читает живые файлы, со всеми контрольными суммами и
-карантином) и сообщает, чем копия является ПО ОТНОШЕНИЮ к текущему файлу:
-
-  «ремонт»   — записи копии в основном лежат и в живом файле: восстановление
-               вернёт потерянное, не тронув остального;
-  «замена»   — пересечение мало или пусто: восстановление СОТРЁТ нынешнее
-               состояние и поставит другое. Это не запрет, это предупреждение;
-  «неизвестно» — у хранилища нет поля тождества, сравнивать нечем.
-
-ОХВАТ, добавлен 2026-08-25 (H-51, класс Atlassian). Скрипт перебирал КОПИИ и
-потому не мог задать вопрос «у чего копий нет». Замер: 19 живых хранилищ из 24
-не имели ни одной копии — среди них журнал бюджета, ящик одобрений и расход
-моделей, — а учение при этом показывало девять зелёных строк. Каталог `data/`
-исключён из git, поэтому версионный контроль запасным путём здесь не является.
-Теперь перебор идёт по ХРАНИЛИЩАМ, и непокрытые называются первыми.
-
-Замер 2026-08-24 на девяти копиях: читаются все девять. Копия постоянной
-памяти от 31 июля пересекается с живым файлом на НОЛЬ записей — то есть она
-замена, а выглядит как обычная копия рядом с остальными.
-
-Ничего не изменяет. Запуск: `python scripts/restore_drill.py`.
-"""
+"""Read-only restore drill: name stores with no backup, tell repair from replacement backups."""
 from __future__ import annotations
 
 import pathlib
@@ -39,10 +8,11 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from core.state_integrity import read_state_jsonl
 
-#: Поле тождества по хранилищам. Порядок важен: берётся первое найденное.
+#: Identity field candidates; order matters, the first one present wins.
 _IDENTITY_FIELDS = ("id", "fingerprint", "record_id", "episode_id")
 
-#: Ниже этой доли общих записей копия считается заменой, а не ремонтом.
+#: Below this share of records shared with the live file, restoring a backup would
+#: replace the current state rather than repair it.
 _REPAIR_OVERLAP = 0.5
 
 
@@ -54,13 +24,9 @@ def _identity(rows: list[dict]) -> str | None:
 
 
 def _backups_for(data: pathlib.Path, store: pathlib.Path) -> list[pathlib.Path]:
-    """Копии, относящиеся к этому хранилищу, от новых к старым.
+    """Backups of this store, newest first: one-off ``*.bak`` files and daily snapshots.
 
-    Считаются ОБА источника восстановления: разовые `.bak`, снимаемые перед
-    рискованной правкой, и суточные снимки `data/snapshots/<дата>/`, заведённые
-    решением оператора 2026-08-25. Учитывать только первый источник значило бы
-    оставить прибор врущим ровно в тот день, когда второй появился, — а именно
-    ложь прибора и была находкой H-51.
+    Daily snapshots live in ``data/snapshots/<date>/``.
     """
     prefix = store.name.split(".jsonl")[0]
     found = [b for b in data.glob("*.bak") if b.name.split(".jsonl")[0] == prefix]
@@ -74,15 +40,13 @@ def _backups_for(data: pathlib.Path, store: pathlib.Path) -> list[pathlib.Path]:
 
 
 def main() -> int:
+    """Print backup coverage and a verdict per backup; exit 1 if any backup is unreadable."""
     data = pathlib.Path("data")
     backups = sorted(data.glob("*.bak"))
     stores = sorted(p for p in data.glob("*.jsonl") if not p.name.endswith(".bak"))
 
-    # H-51: раньше перебирались КОПИИ, и потому вопрос «у чего копий нет» не
-    # задавался вовсе. Замер 2026-08-25: 19 живых хранилищ из 24 — включая
-    # журнал бюджета, ящик одобрений и расход моделей — не имели ни одной
-    # копии, а учение показывало девять зелёных строк. Каталог `data/`
-    # исключён из git, так что версионный контроль здесь не запасной путь.
+    # Walk stores, not backups, so a store with no backup at all is named; data/ is not
+    # in git, so version control is no fallback here.
     uncovered = [s for s in stores if not _backups_for(data, s)]
     covered = len(stores) - len(uncovered)
     print(f"живых хранилищ: {len(stores)}, из них с копией: {covered}")
@@ -102,14 +66,14 @@ def main() -> int:
         live = data / (backup.name.split(".jsonl")[0] + ".jsonl")
         try:
             rows = read_state_jsonl(backup)
-        except Exception as exc:  # noqa: BLE001 — нечитаемая копия и есть находка
+        except Exception as exc:  # noqa: BLE001 — an unreadable backup is itself the finding
             print(f"  НЕ ЧИТАЕТСЯ  {backup.name}: {type(exc).__name__}: {exc}")
             unreadable += 1
             continue
 
         try:
             current = read_state_jsonl(live) if live.exists() else []
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001 — an unreadable live file compares as empty
             current = []
 
         field = _identity(rows)

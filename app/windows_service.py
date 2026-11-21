@@ -1,15 +1,7 @@
-"""Architecture-only Windows service shell for daemon plan item 1.4.
-
-The project has selected ``pywin32`` as the single Windows service mechanism.
-This module fixes the service contract without yet installing, removing,
-starting, stopping, or configuring recovery for a real service. Those actions
-belong to later roadmap items and must not be added here implicitly.
-
-The module is safe to import on non-Windows systems: pywin32 is never imported
-at module import time. Runtime checks fail with clear messages instead.
-"""
+"""Architecture-only pywin32 Windows service shell: the contract, no install/start/stop."""
 from __future__ import annotations
 
+# pywin32 is never imported at module level, so this module imports on any OS.
 import importlib.util
 import json
 import os
@@ -47,11 +39,7 @@ class WindowsServiceConfigError(ValueError):
 
 @dataclass(frozen=True)
 class WindowsServiceContract:
-    """Resolved, machine-local contract for the future pywin32 service.
-
-    Paths are computed at runtime. No absolute path from a specific machine is
-    stored in the repository.
-    """
+    """Machine-local contract for the future pywin32 service; paths are computed at runtime."""
 
     workspace: Path = DEFAULT_WORKSPACE
     venv_dir: Path | None = None

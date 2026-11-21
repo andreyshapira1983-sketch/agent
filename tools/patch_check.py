@@ -1,38 +1,4 @@
-"""`patch_check` — проверить свою правку в отдельной копии, не трогая живой код.
-
-Разговор 2026-09-22 (задача «банк уроков»): агент дважды писал правку, где
-старый кусок был набран по памяти, а не скопирован из файла, — и узнавал об
-этом только от Claude, ходом позже. Современные агенты замыкают этот круг
-сами: инструмент правки сверяет кусок с файлом и возвращает ошибку со строками
-файла (str_replace у редактора Anthropic, str_replace_editor в OpenHands,
-SEARCH/REPLACE в Aider). Здесь то же, но без записи в живой код: правка
-кладётся в чистую копию репозитория вне рабочей папки, там гоняются ruff и
-тесты, и весь вывод возвращается агенту в том же ходе.
-
-Формат правки — текстовые блоки (без JSON внутри JSON — на нём 14:09 сломался
-план):
-
-    FILE: core/x.py
-    <<<<<<< SEARCH
-    дословный кусок, встречается в файле ровно один раз
-    =======
-    новый текст
-    >>>>>>> REPLACE
-
-Пустой SEARCH — новый файл. Второй вид блока — по номерам строк, которые
-показывает file_read (копировать старый текст не нужно; так же устроены
-`insert`/`view` у редактора Anthropic и OpenHands):
-
-    FILE: core/x.py
-    <<<<<<< LINES 284-292
-    новый текст на место строк 284–292
-    >>>>>>> REPLACE
-
-2026-09-22 14:37: модель трижды не смогла переписать сигнатуру символ в
-символ, хотя видела её, — номера строк она видит без ошибок. Номера — по
-файлу ДО правки. В ответе — итоговая разница, чтобы увидеть, что легло. Риск — `reversible`, как у `run_tests`: код
-тестов исполняется, но рабочая папка не меняется.
-"""
+"""Try a patch in a throwaway copy of the repo with ruff and pytest; live code stays untouched."""
 from __future__ import annotations
 
 import os
@@ -65,12 +31,7 @@ _TIMEOUT_SECONDS = 900
 
 
 def _lines_new(body: str) -> str:
-    """Тело блока LINES: новый текст, либо «старый ======= новый» — старое для сверки.
-
-    2026-09-22 14:54: агент четыре круга подряд клал в LINES старый текст, а
-    новый — после закрывающей метки; блок менял строки на те же, новое
-    пропадало молча. Модель тянется к форме SEARCH — она теперь принята.
-    """
+    """Body of a LINES block: the new text, or "old ======= new", whose new half is taken."""
     parts = re.split(r"^=======\n", body, maxsplit=1, flags=re.MULTILINE)
     return parts[1] if len(parts) == 2 else body
 
@@ -85,11 +46,11 @@ def _matches(text: str) -> list[tuple[int, int, dict[str, Any]]]:
 
 
 def parse_blocks(text: str) -> list[dict[str, Any]]:
-    """Блоки правки в порядке текста: ПОИСК/ЗАМЕНА и замена по номерам строк."""
+    """Patch blocks in text order: SEARCH/REPLACE and replacement by line numbers."""
     return [b for _, _, b in _matches(text)]
 
 
-#: Правильные маркеры — для подсказки «вы имели в виду».
+#: The valid markers, for the "did you mean" hint.
 _MARKERS = ("<<<<<<< SEARCH", "=======", ">>>>>>> REPLACE", "<<<<<<< LINES a-b")
 _OPENING = re.compile(r"^<{5,9}\s*(SEARCH|LINES)\b", re.MULTILINE)
 _CLOSING = re.compile(r"^>{5,9}\s*REPLACE\b", re.MULTILINE)
@@ -98,12 +59,7 @@ _VALID_MARKER = re.compile(r"^(?:<{7} SEARCH|={7}|>{7} REPLACE|<{7} LINES \d+-\d
 
 
 def after_lines_hint(raw: str, stray: str) -> str:
-    """Текст сразу за закрытым блоком LINES — это новый текст, положенный не туда.
-
-    loop_journal 24.09: агент клал в LINES старые строки, закрывал блок и писал
-    новые ПОСЛЕ «>>>>>>> REPLACE»; отказ «text outside blocks» молчал почему —
-    подсказка видела только выброшенный кусок, а не блок перед ним.
-    """
+    """Hint when the text right after a closed LINES block is new text put in the wrong place."""
     at = raw.find(stray.strip()[:80]) if stray.strip() else -1
     before = raw[:at].rstrip() if at > 0 else ""
     if not before.endswith("REPLACE"):
@@ -116,16 +72,7 @@ def after_lines_hint(raw: str, stray: str) -> str:
 
 
 def marker_hint(stray: str) -> str:
-    """Чем выброшенный текст отличается от правильного блока, или пусто.
-
-    Замер 2026-09-23 по 11 красным «text outside blocks» из
-    data/self_repair_log.jsonl: в семи сломана сама строка-маркер (SEARCH без
-    <<<<<<<, блок не закрыт >>>>>>> REPLACE, не то число знаков), в одном —
-    чужой формат unified diff, в трёх — проза. Сообщение печатало выброшенное
-    и молчало о том, что с ним не так; исправиться по нему было нельзя. Так же
-    подсказывает Python с 3.10 («Did you mean …?» для NameError): ближайшее
-    правильное имя по расстоянию редактирования. Проза подсказки не получает.
-    """
+    """How stray text differs from a valid block (a "did you mean" hint); "" for prose."""
     import difflib
 
     lines = stray.splitlines()
@@ -136,9 +83,8 @@ def marker_hint(stray: str) -> str:
                 "перепиши блоком FILE: путь / <<<<<<< LINES a-b / новый текст / >>>>>>> REPLACE")
     if (_OPENING.search(stray) and _CLOSING.search(stray)
             and not any(ln.lstrip().startswith("FILE:") for ln in lines)):
-        # 24.09: писатель положил блоки без строки FILE:, отказ молчал почему.
         return "перед блоком нужна строка 'FILE: <путь>' — без неё блок не знает, какой файл править"
-    # Сначала неверный маркер в строке: это причина, а «не закрыт» — следствие.
+    # A malformed marker line first: it is the cause, "not closed" only its consequence.
     for line in lines:
         bare = line.strip()
         if not bare or len(bare) > 40 or _VALID_MARKER.match(bare):
@@ -162,7 +108,7 @@ def marker_hint(stray: str) -> str:
 
 
 def stray_text(text: str) -> list[str]:
-    """Текст вне блоков — он не ляжет никуда; молча выбрасывать его нельзя."""
+    """Text outside any block: it lands nowhere, so it must not be dropped silently."""
     out, pos = [], 0
     for start, end, _ in _matches(text):
         if (text[pos:start]).strip():
@@ -174,7 +120,7 @@ def stray_text(text: str) -> list[str]:
 
 
 def _apply_line_blocks(root: Path, blocks: list[dict[str, Any]]) -> list[str]:
-    """Замены по номерам строк — по файлу ДО правки, снизу вверх."""
+    """Line-number replacements, numbered by the file before the patch, applied bottom-up."""
     errors: list[str] = []
     by_file: dict[str, list[dict[str, Any]]] = {}
     for b in blocks:
@@ -213,7 +159,7 @@ def _diff(root: Path, originals: dict[str, str]) -> str:
 
 
 def _nearest(text: str, old: str) -> str:
-    """Где в файле лежит первая строка куска — дословно, с номерами, для копирования."""
+    """Where the block's first line sits in the file, verbatim with line numbers, to copy."""
     first = next((ln.strip() for ln in old.splitlines() if ln.strip()), "")
     lines = text.splitlines()
     hits = [i for i, ln in enumerate(lines) if first and first in ln]
@@ -230,9 +176,9 @@ def _tail(text: str, n: int = _TAIL_LINES) -> str:
 
 
 def apply_blocks(root: Path, blocks: list[dict[str, Any]]) -> list[str]:
-    """Положить блоки в копию; вернуть ошибки (пусто — всё легло).
+    """Apply blocks to the copy and return the errors ([] means everything applied).
 
-    Сначала замены по номерам строк (номера — по файлу до правки), затем ПОИСК/ЗАМЕНА.
+    LINES blocks go first, numbered by the file before the patch; then SEARCH/REPLACE.
     """
     errors = _apply_line_blocks(root, [b for b in blocks if "lines" in b])
     for n, b in enumerate(blocks, 1):
@@ -242,9 +188,7 @@ def apply_blocks(root: Path, blocks: list[dict[str, Any]]) -> list[str]:
         if root.resolve() not in target.parents:
             errors.append(f"блок {n}: путь {b['path']} выходит за копию")
             continue
-        # Пустой — значит без единого знака, КРОМЕ пробелов и переводов строк:
-        # 2026-09-23 18:36 агент оставил между <<<<<<< SEARCH и ======= пустую
-        # строку, кусок стал '\n', нашёлся 69 раз, и новый файл не создался.
+        # Whitespace-only SEARCH is empty (a new file); a blank line would match everywhere.
         if not b["old"].strip():
             if target.exists():
                 errors.append(f"блок {n}: SEARCH пуст (новый файл), но {b['path']} уже есть — "
@@ -268,12 +212,7 @@ def apply_blocks(root: Path, blocks: list[dict[str, Any]]) -> list[str]:
 
 
 def _verdict(result: dict[str, Any]) -> dict[str, str]:
-    """Зелёное — только правка, которая что-то меняет, несёт тест, и тест проходит.
-
-    2026-09-22 14:43: агент заменил строки 284–292 теми же строками, без теста;
-    проверка ответила applied=True, и ход закрылся как сделанный. Правка без
-    изменения и без теста не доказывает ничего — это не зелёное.
-    """
+    """Green only for a patch that changes something, carries a test, and passes its checks."""
     if not result.get("diff"):
         return {"verdict": "red", "why": "the patch changes nothing (empty diff)"}
     if result.get("tests_exit_code") is None:
@@ -307,22 +246,18 @@ def _ruff_errors(code: int, out: str) -> int:
 
 
 def _scratch(workspace: Path) -> tempfile.TemporaryDirectory[str]:
-    """Папка для копии — рядом с рабочей и открытая на чтение, как живая.
-
-    В /tmp (0700) песочница проб (отдельный пользователь) копию не читала, а
-    сторож записи считает весь /tmp своим: два теста проб падали в любой копии.
-    """
+    """Scratch dir beside the workspace, readable by the probe sandbox user (unlike /tmp)."""
     scratch = tempfile.TemporaryDirectory(prefix="patch_check_", dir=workspace.parent)
-    os.chmod(scratch.name, 0o755)  # noqa: S103 — копия репозитория, секретов в ней нет
+    os.chmod(scratch.name, 0o755)  # noqa: S103 — a repository copy holds no secrets
     return scratch
 
 
-#: Сколько соседних тестов (импортирующих изменённый модуль) добавлять к прогону.
+#: How many neighbour tests (importing a changed module) join the run.
 _NEIGHBOR_LIMIT = 15
 
 
 def _neighbor_tests(root: Path, source: list[str], exclude: set[str]) -> list[str]:
-    """Существующие тесты, которые импортируют изменённые модули кода."""
+    """Existing tests that import the changed source modules."""
     import re
 
     mods = [p[:-3].replace("/", ".") for p in source if p.endswith(".py")]
@@ -346,7 +281,7 @@ def _neighbor_tests(root: Path, source: list[str], exclude: set[str]) -> list[st
 
 
 def patched_contents(workspace: Path, patch_rel: str) -> dict[str, str]:
-    """Полное содержимое файлов после правки — для штатного пути применения."""
+    """Full file contents after the patch, for the regular apply path."""
     blocks = parse_blocks((Path(workspace) / patch_rel).read_text(encoding="utf-8"))
     with tempfile.TemporaryDirectory(prefix="patch_apply_") as tmp:
         copy = Path(tmp) / "repo"
@@ -357,13 +292,10 @@ def patched_contents(workspace: Path, patch_rel: str) -> dict[str, str]:
         return {p: (copy / p).read_text(encoding="utf-8") for p in dict.fromkeys(b["path"] for b in blocks)}
 
 
-#: Порядок полей ответа: сначала то, что решает, — вердикт и вывод тестов,
-#: diff последним. 2026-09-22 16:15: показ ответа агенту режется на 6000 знаков,
-#: длинный diff стоял раньше вывода тестов — агент пять кругов не видел новой
-#: ошибки и чинил уже исправленную.
+#: Deciding fields first and the diff last: the agent is shown only the first 6000 characters.
 _ORDER = ("verdict", "why", "applied", "where", "errors", "tests_exit_code", "tests_output",
           "full_exit_code", "full_output", "ruff", "ruff_new_errors", "files", "diff")
-#: «applied: True» читалось как «правка уже в файле»: агент писал добавку к своей прошлой попытке.
+#: Says where the patch landed: "applied: True" alone was read as "already in the file".
 _WHERE = ("a throwaway copy — no file on disk changed; every check starts again from the files "
           "on disk, so the patch file must hold the WHOLE change against them")
 
@@ -400,7 +332,7 @@ class PatchCheckTool(Tool):
         return "reversible"
 
     def _clone(self, dest: Path) -> None:
-        subprocess.run(["git", "clone", "-q", str(self.workspace_root), str(dest)],  # noqa: S603, S607 — свои пути, без оболочки
+        subprocess.run(["git", "clone", "-q", str(self.workspace_root), str(dest)],  # noqa: S603, S607 — own paths, no shell
                        check=True, capture_output=True, timeout=300)
         example = self.workspace_root / ".env.example"
         if example.exists():
@@ -408,9 +340,7 @@ class PatchCheckTool(Tool):
 
     def _run(self, cmd: list[str], cwd: Path) -> tuple[int, str]:
         try:
-            # argv из своих частей, пути проверены require_ascii_identifier.
-            # Окружение — как у run_tests, без ключей: 2026-09-22 15:07 полный
-            # набор с настоящим ключом DeepSeek в окружении не уложился в 900 с.
+            # argv from own parts, paths checked; env as in run_tests, without API keys.
             from tools.run_tests import RunTestsTool
 
             p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, encoding="utf-8",  # noqa: S603
@@ -442,7 +372,7 @@ class PatchCheckTool(Tool):
             files = list(dict.fromkeys(b["path"] for b in blocks))
             originals = {f: (copy / f).read_text(encoding="utf-8") if (copy / f).is_file() else "" for f in files}
             py = [b["path"] for b in blocks if b["path"].endswith(".py")]
-            # Ошибки ruff, что были в файлах до правки, — не её: считается только прибавка.
+            # Ruff errors already in the files are not the patch's: only the increase counts.
             before = [p for p in dict.fromkeys(py) if (copy / p).is_file()]
             ruff_before = _ruff_errors(*self._run([sys.executable, "-m", "ruff", "check", *before], copy)) \
                 if before else 0
@@ -471,9 +401,7 @@ class PatchCheckTool(Tool):
                 result["tests_exit_code"] = None
                 result["tests_output"] = "no test file in the patch and none named — a change without a test proves nothing"
             if result.get("tests_exit_code") == 0 and own_tests and source:
-                # Свидетель: новый тест обязан ПАДАТЬ на старом коде. 2026-09-24:
-                # «зелёная» правка агента прошла только свои два теста, которые
-                # проходили и до правки, а ломала 5 соседних — подгонка под прибор.
+                # Witness: the new test must fail on the old code.
                 witness = Path(tmp) / "witness"
                 self._clone(witness)
                 errs = apply_blocks(witness, [b for b in blocks if b["path"] in own_tests])
@@ -482,8 +410,7 @@ class PatchCheckTool(Tool):
                                            *own_tests], witness)
                     result.update(witness_exit_code=code, witness_output=_tail(out, 15))
             if full and result.get("tests_exit_code") not in (0, None):
-                # 2026-09-22 15:33–15:40: свой тест красный, а полный набор (3 мин)
-                # гонялся каждый круг — три круга из шести ушли на ожидание.
+                # Own tests are red: skip the slow full suite until they pass.
                 result["full_output"] = "skipped: your own tests are red — make them green first"
             elif full:
                 code, out = self._run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"], copy)

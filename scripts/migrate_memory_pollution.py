@@ -1,48 +1,11 @@
-"""Archive persistent-memory rows today's knowledge gate would never write.
+"""Archive persistent-memory rows that today's knowledge write gate would never write.
 
-Root cause A of FABLE_AUDIT.md: the knowledge write gate historically trusted
-source *type* weakness only, so three pollution classes entered
-``data/persistent_memory.jsonl`` as durable Confidence-0.85 "facts":
+Every decision reuses the writer's own present-day rules from core.knowledge_pipeline,
+and rows the knowledge writer did not produce are never touched. Matching rows are moved
+(archived: true) to persistent_memory.archive.jsonl, never deleted. Dry-run by default;
+--apply writes after backing up both files. A second run finds nothing (idempotent).
 
-  1. rows from NON-ASSERTING sources — log / test_result / memory /
-     tool_output / code_repository (MIR-054: observations of one moment,
-     not standing claims);
-  2. ``file`` rows extracted from CODE files (``tests/*.py`` asserts and the
-     like — programs do not assert);
-  3. ``file`` rows whose content is a raw code fragment or mojibake, banked
-     before ``ClaimExtractor._accept_sentence`` learned to reject them
-     (commit e1232e0 and the cluster-1b hardening).
-
-The gate is fixed (PR #200 + this branch), which stops the inflow. This
-script drains the pool: it ARCHIVES matching rows — moves them to the
-``.archive.jsonl`` store the hot path never injects — it deletes nothing.
-
-**How it decides.** Every decision is delegated to the writer's own
-present-day rules, imported from ``core.knowledge_pipeline`` — the same
-functions the gate itself calls. There is no second classifier to drift out
-of sync (the report and the migration use the identical decision), and rows
-this writer never produced — no ``fact``/``knowledge``/``source-backed``
-tag triple, or any owner other than ``self`` — are not touched at all:
-lessons, user notes and anything hand-written stay where they are, fail
-closed.
-
-**How it writes.** Rows are integrity-envelope encoded, so hand-editing the
-file corrupts it. The rewrite goes through ``state_file_lock`` +
-``rewrite_state_jsonl_unlocked`` / ``append_state_jsonl_unlocked`` — the same
-path ``PersistentMemoryStore.archive_record`` uses — and the only mutation a
-payload receives is ``archived: true``. The lock is held across read and
-write; both stores are only written after both new contents are computed.
-The write order is archive-first, and the append is recovery-idempotent: a
-retry after a crash between the two writes skips rows the archive already
-holds verbatim, and aborts before any write when the archive holds the same
-ID with different content.
-
-Dry-run is the default. ``--apply`` writes, after taking a timestamped backup
-of BOTH files. A second run finds nothing left to archive (idempotent).
-
-    python scripts/migrate_memory_pollution.py             # show the plan
-    python scripts/migrate_memory_pollution.py --apply     # write it
-    python scripts/migrate_memory_pollution.py --workspace <path>
+Usage: python scripts/migrate_memory_pollution.py [--apply] [--json] [--workspace PATH]
 """
 
 from __future__ import annotations
@@ -70,11 +33,8 @@ from core.state_integrity import (  # noqa: E402
     state_file_lock,
 )
 
-# The exact writer signature KnowledgeWritePolicy leaves on every row it
-# writes: the tag triple from ``memory_tags`` AND ``owner="self"`` — the
-# pipeline calls ``remember(content, tags, "agent-auto", "semantic", "self")``.
-# Requiring all of it IS the writer signature (MIR-057): a row without them
-# was written by someone else and is not ours to reclassify.
+# The knowledge writer's signature: this tag triple and owner "self". A row without
+# it was written by someone else and is not ours to reclassify.
 _WRITER_SIGNATURE = frozenset({"fact", "knowledge", "source-backed"})
 _WRITER_OWNER = "self"
 
@@ -86,12 +46,7 @@ _SOURCE_TYPE_TAGS = _NON_ASSERTING_SOURCE_TYPES | {
 
 
 def _source_line(content: str) -> tuple[str, str] | None:
-    """Parse the ``Source: <type>:<locator>`` line memory_content embeds.
-
-    Returns (type, locator) or None when the line is absent/malformed —
-    absence means the row did not come through ``memory_content`` and the
-    migration must not touch it (fail closed).
-    """
+    """Parse the ``Source: <type>:<locator>`` line; None (keep the row) when absent or malformed."""
     for line in str(content).splitlines():
         line = line.strip()
         if line.startswith("Source: "):
@@ -114,14 +69,7 @@ def _claim_text(content: str) -> str:
 
 
 def archive_reason(payload: dict[str, Any]) -> str | None:
-    """Why this row would not pass today's writer — or None to keep it.
-
-    Decision order mirrors ``KnowledgeWritePolicy.decide`` and
-    ``ClaimExtractor._accept_sentence``; every predicate is the writer's own,
-    imported, not re-implemented. Rows without the writer's tag signature or
-    without a parseable Source line are KEPT (fail closed): this migration
-    reclassifies only what the knowledge writer provably produced.
-    """
+    """Why today's writer would reject this row, or None to keep it (unknown rows fail closed)."""
     tags = payload.get("tags")
     if not isinstance(tags, list) or not all(isinstance(t, str) for t in tags):
         return None
@@ -129,9 +77,7 @@ def archive_reason(payload: dict[str, Any]) -> str | None:
     if not tag_set >= _WRITER_SIGNATURE:
         return None
     if payload.get("owner") != _WRITER_OWNER:
-        # A user- or session-owned row wearing the writer's tags was written
-        # by someone else (or edited). Archiving a user's own note would be
-        # data loss; leave it alone.
+        # A user- or session-owned row wearing the writer's tags is someone else's note.
         return None
     if payload.get("archived") is True:
         return None
@@ -140,8 +86,7 @@ def archive_reason(payload: dict[str, Any]) -> str | None:
     if parsed is None:
         return None
     source_type, locator = parsed
-    # The tag the writer stamped and the Source line it embedded must agree;
-    # a mismatch means the row was edited or corrupted — leave it alone.
+    # The stamped tag and the embedded Source line must agree; a mismatch means an edited row.
     if source_type not in tag_set or source_type not in _SOURCE_TYPE_TAGS:
         return None
 
@@ -195,23 +140,7 @@ def describe(payloads: list[dict[str, Any]], plan: list[tuple[int, str]]) -> str
 
 def apply_migration(store_path: Path, payloads: list[dict[str, Any]],
                     plan: list[tuple[int, str]]) -> dict[str, Any]:
-    """Move planned rows to the archive store. Caller holds the ACTIVE lock.
-
-    The archive has its own lockfile: ``state_file_lock(path)`` locks only
-    ``<path>.lock``, so holding the active store's lock says nothing about
-    the archive. `PersistentMemoryStore.archive_record` appends under
-    ``state_file_lock(archive_path)``; this function takes the same lock
-    around everything that reads or writes the archive, so the two can never
-    interleave an append.
-
-    Recovery-idempotent: the write order is archive-first, so a crash
-    between the append and the active-store rewrite leaves the moved rows in
-    BOTH stores. A retry therefore checks the archive before appending —
-    a row already archived with identical content is not appended again
-    (only its active copy is removed); the same ID with DIFFERENT content
-    aborts before any backup or write, because silently preferring either
-    copy would be a guess.
-    """
+    """Move planned rows to the archive store, archive first; the caller holds the active lock."""
     archive_path = store_path.with_suffix(".archive.jsonl")
     planned = {index for index, _reason in plan}
 
@@ -225,8 +154,9 @@ def apply_migration(store_path: Path, payloads: list[dict[str, Any]],
         else:
             keep.append(payload)
 
+    # The active store's lock does not cover the archive, which has its own lockfile.
     with state_file_lock(archive_path):
-        # Inspect the archive under ITS lock BEFORE mutating anything.
+        # Read the archive before any write: a conflicting id aborts with both stores intact.
         existing_by_id: dict[str, dict[str, Any]] = {}
         if archive_path.exists():
             for row in read_state_jsonl_unlocked(archive_path):
@@ -241,8 +171,7 @@ def apply_migration(store_path: Path, payloads: list[dict[str, Any]],
             if prior is None:
                 to_append.append(moved)
             elif prior == moved:
-                # An interrupted earlier run already archived this exact row;
-                # skip the append, the rewrite below removes the active copy.
+                # An interrupted run already archived this row; the rewrite drops its active copy.
                 recovered += 1
             else:
                 raise ValueError(
@@ -255,9 +184,7 @@ def apply_migration(store_path: Path, payloads: list[dict[str, Any]],
         backup_archive = (
             backup_state_file(archive_path) if archive_path.exists() else None
         )
-        # Archive first: if the append fails, the active store is untouched
-        # and a re-run plans the same rows again. The reverse order could
-        # lose rows.
+        # Archive first: a failed append leaves the active store intact; reversing could lose rows.
         if to_append:
             append_state_jsonl_unlocked(archive_path, to_append)
     rewrite_state_jsonl_unlocked(store_path, keep)
@@ -290,8 +217,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"no persistent store at {path} — nothing to do")
         return 0
 
-    # Lock held across read and write: a cycle writing a record midway would
-    # otherwise be dropped by the rewrite.
+    # Hold the lock across read and write, or a record written meanwhile is lost by the rewrite.
     with state_file_lock(path):
         payloads = read_state_jsonl_unlocked(path)
         plan = plan_migration(payloads)

@@ -1,9 +1,4 @@
-"""Deterministic REPL planners: `:source-review-plan`,
-`:implementation-plan`, `:patch-proposal-plan`.
-
-They read the Source Registry and emit a plan payload; they never ingest,
-never write, and never call a model.
-"""
+"""Deterministic read-only REPL planners built from the Source Registry (no model, no writes)."""
 from __future__ import annotations
 
 import json
@@ -89,11 +84,8 @@ def _handle_patch_proposal_plan(rest: str, agent: AgentLoop, workspace: Path) ->
     return True
 
 
-# Verbs + qualifiers that mark an *explicit* "read/inspect/review these files
-# first" request. When such a request names files but none of them are grounded
-# in the Source Registry, the deterministic planners must NOT emit a plan that
-# pretends to be source-grounded (sources=0). They return a blocked
-# insufficient_source_evidence result instead (read-only; no web/tests/writes).
+# Words marking an explicit "read these files first" request; if none of the named
+# files is in the Source Registry, the planners return a blocked result, not a plan.
 _EXPLICIT_READ_VERBS = (
     "read",
     "inspect",
@@ -137,13 +129,7 @@ def _insufficient_source_evidence_payload(
     *,
     requested_kind: str,
 ) -> dict | None:
-    """Return a blocked payload when an explicit read-first request is ungrounded.
-
-    Trigger: the goal explicitly asks to read/inspect/review named files first,
-    those files are named (``requested_mentions``), but none of them were matched
-    in the Source Registry (``matched_sources`` empty). Otherwise returns None so
-    the normal deterministic plan is produced.
-    """
+    """Return a blocked payload when named read-first files are not in the registry, else None."""
     if not _requests_explicit_file_read(goal):
         return None
     requested = list(source_review.get("requested_mentions", []))

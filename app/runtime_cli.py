@@ -1,11 +1,4 @@
-"""Bounded autonomous runtime REPL handlers (:auto-run, :work-session, :campaign-*).
-
-Split out of ``main.py``. These handlers only orchestrate AutonomousRuntime,
-work-session, and campaign flows — they do not own scheduler/task-queue or
-approval-inbox logic (those stay in ``cli/commands_approval.py`` and ``main``).
-
-``main.py`` re-exports every name below so existing imports keep working.
-"""
+"""Bounded autonomous runtime REPL handlers (:auto-run, :work-session, :campaign-*)."""
 from __future__ import annotations
 
 import json
@@ -95,7 +88,6 @@ def _handle_auto_run(rest: str, agent: AgentLoop, workspace: Path) -> bool:
         i += 1
 
     goal = " ".join(goal_parts).strip() or "project health"
-    # --include-goal only makes sense when a real goal was provided
     if include_goal and goal == "project health":
         print(
             "(auto-run: --include-goal requires a goal text, e.g.: "
@@ -236,15 +228,7 @@ def _handle_work_session(rest: str, agent: AgentLoop, workspace: Path) -> bool:
 
 
 def _handle_campaign_start(rest: str, agent: AgentLoop, workspace: Path) -> bool:
-    """Handle :campaign-start — a budgeted multi-cycle autonomous campaign.
-
-    Unlike :work-session (a fixed time/cycle health loop), a campaign records a
-    per-cycle ledger (goal, best-next-action, cost, result, proposal,
-    reason_if_idle) and stops honestly: when the budget is spent, or after N
-    consecutive idle cycles where there is no high-priority action to take. An
-    idle cycle spends NO model call. Dry-run by default — effects still flow
-    only through the existing approval gate.
-    """
+    """Handle :campaign-start — a budgeted multi-cycle campaign with a per-cycle ledger."""
     tokens = _split_meta_args(rest)
     dry_run = True
     max_cycles = 24
@@ -386,14 +370,7 @@ def _handle_campaign_start(rest: str, agent: AgentLoop, workspace: Path) -> bool
 
 
 def _handle_campaign_status(rest: str, agent: AgentLoop, workspace: Path) -> bool:
-    """Handle :campaign-status — read the campaign ledger and print a digest.
-
-    Pure read-only operator window over ``data/campaign_ledger.jsonl``: spends
-    no budget, creates no agent, touches no state. Answers "what did it do with
-    my keys?" by aggregating every recorded cycle (all-time totals, per-result
-    counts, distinct goals) and showing the most recent cycles. ``--recent N``
-    controls how many trailing rows to show (0 = all).
-    """
+    """Handle :campaign-status — print a read-only ledger digest (``--recent N``, 0 = all)."""
     tokens = _split_meta_args(rest)
     recent = 10
     i = 0
@@ -421,12 +398,8 @@ def _handle_campaign_status(rest: str, agent: AgentLoop, workspace: Path) -> boo
     return True
 
 
-# -- :auto-status -------------------------------------------------------------
-# Read-only digest of the autonomous runtime inbox, extracted verbatim from
-# main.py. It reports; it never starts a pass.
-
-
 def _handle_auto_status(agent: AgentLoop, workspace: Path) -> bool:
+    """Handle :auto-status — print a read-only runtime digest; never starts a pass."""
     status = AutonomousRuntime(
         agent,
         workspace=workspace,

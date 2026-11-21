@@ -161,20 +161,15 @@ def _assert_peer_ip_global(sock: Any, *, tool_name: str) -> None:
 
 
 def _tls_context() -> ssl.SSLContext:
-    """Проверяющий TLS-контекст на корнях certifi (как у requests), иначе системный.
+    """Verifying TLS context on certifi roots (as requests does), else the system store.
 
-    Веб-экзамен 2026-09-19, второй прогон, N07: `peps.python.org` не
-    открылся — «CERTIFICATE_VERIFY_FAILED: unable to get issuer certificate».
-    Хранилище Windows не знало промежуточного звена, OpenSSL его не догружает;
-    с набором certifi тот же адрес отвечает 200. Смешать оба хранилища нельзя:
-    OpenSSL строит цепь через системное звено и снова не находит корня
-    (проверено). Проверка не ослаблена: `verify_mode` и сверка имени — прежние.
+    Never both: OpenSSL would chain through the system intermediate and miss the root again.
     """
     try:
         import certifi
         return ssl.create_default_context(cafile=certifi.where())
     except (ImportError, OSError, ssl.SSLError):
-        return ssl.create_default_context()  # без certifi — системное хранилище, как прежде
+        return ssl.create_default_context()  # no certifi: the system store
 
 
 def _guarded_handlers(policy: NetworkSafetyPolicy) -> list[urllib.request.BaseHandler]:
@@ -197,8 +192,7 @@ def _guarded_handlers(policy: NetworkSafetyPolicy) -> list[urllib.request.BaseHa
 
     class _GuardedHTTPSHandler(urllib.request.HTTPSHandler):
         def https_open(self, req):
-            # Контекст передаётся явно: переопределение без него молча теряло
-            # его, и соединение шло на контексте по умолчанию.
+            # Pass the context explicitly: without it the connection used the default context.
             return self.do_open(_GuardedHTTPSConnection, req, context=self._context)
 
     return [_GuardedHTTPHandler(), _GuardedHTTPSHandler(context=_tls_context())]
@@ -231,14 +225,9 @@ def host_patterns_from_env(name: str) -> tuple[str, ...]:
 
 
 def reserve_egress(budget_ledger, *, tool_name: str, target: str) -> None:
-    """Charge one `web_fetches` unit on the persistent budget ledger before
-    any egress; refuse when the window is exhausted.
+    """Charge one `web_fetches` unit on the budget ledger before any egress; refuse when spent.
 
-    Block 7 (audit W3, 2026-09-03): `web_fetches` had limits in
-    `config/budget_limits.json`, a kill-switch and a health line reading
-    `web_fetches=0/300` — and no site that ever charged it, so the meter read
-    zero while unattended web was open. `None` ledger = unmetered (tests,
-    scripts that build a tool by hand).
+    A None ledger means unmetered (tests, scripts that build a tool by hand).
     """
     if budget_ledger is None:
         return

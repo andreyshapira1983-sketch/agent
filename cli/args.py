@@ -1,6 +1,4 @@
-"""The command-line surface of ``python main.py`` -- flags, defaults, help
-text.
-"""
+"""Argument parser for ``python main.py``: flags, defaults and help text."""
 from __future__ import annotations
 
 import argparse
@@ -11,10 +9,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="main.py",  # Python 3.14 otherwise derives the name from how the process was started
         description=(
-            # ASCII only: the console this ships on is cp1251, and an em
-            # dash here printed as a replacement char in the FIRST line of
-            # --help on every run. No version number either - it was MVP-4
-            # here and MVP-5 in main.py, and both were years behind.
+            # ASCII only: the cp1251 console garbles an em dash. No version number: it goes stale.
             "Autonomous agent - the LLM picks tools; sessions keep working memory."
         )
     )

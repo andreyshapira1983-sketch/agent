@@ -468,7 +468,7 @@ out.
 ### The journal already had a consumer — an unsearched absence, corrected
 
 The draft above recorded "no named consumer reads it". **FALSE.**
-`tools/agent_state_view.py:217` `run_journal()` reads the newest run log, filters
+`tools/agent_state_view.py:181` `run_journal()` reads the newest run log, filters
 by event name, and returns a bounded result through the MCP server. It predates
 this experiment by a long way — its own docstring cites MIR-077 and a review of
 #317. The claim was an unsearched absence of exactly the kind the negative-claims
@@ -851,7 +851,7 @@ second suspect and is also innocent — `max_cost_tier` is `None` with no enviro
 set, so it returns the route untouched. The producer is `_llm_factory`'s
 credential-healing branch:
 
-> `app/bootstrap.py:145` router → `:161` `for_role(SYNTHESIZER)` → route model
+> `app/bootstrap.py:118` router → `:161` `for_role(SYNTHESIZER)` → route model
 > `gpt-5.4` → `core/model_router.py:784` `_llm_factory`: the default provider is
 > `anthropic`, **anthropic has no credentials here**, so the branch substitutes the
 > first credentialed provider and **drops the model**, by design and by its own

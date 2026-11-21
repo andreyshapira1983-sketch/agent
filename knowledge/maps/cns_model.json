@@ -321,7 +321,7 @@
     }
    ],
    "consumers": [
-    "checkpoint file -> resume prompt (cli/resume.py:51: question, goal, phase, steps, counter)",
+    "checkpoint file -> resume prompt (cli/resume.py:22: question, goal, phase, steps, counter)",
     "task queue paused entry -> operator visibility (:queue-status resumable list, task_queue.py:582)",
     "journal: model_budget_blocked exactly once; resumable_checkpoint_paused; resumable_task_paused",
     "user: clean 'Model budget exceeded' message instead of a traceback"
@@ -352,7 +352,7 @@
    ]
   },
   "on_token_streaming": {
-   "producer": "run(on_token=...) at the entry edge; budget_guard builds the stdout callback (app/budget_guard.py:48)",
+   "producer": "run(on_token=...) at the entry edge; budget_guard builds the stdout callback (app/budget_guard.py:31)",
    "carrier": "instance attribute _stream_on_token (core/loop.py:276); cleared at end of run (loop.py:694) and by every early-deciding gate (loop_gates.py:108,110,188,245)",
    "consumer": "loop_synthesis.py:524-531 — when set, synthesis calls stream_complete instead of complete",
    "effect_level": "L6 — probe 2026-08-08: tokens arrive at the callback and their concatenation equals the returned answer",
@@ -377,7 +377,7 @@
    ]
   },
   "deep_escalation_delivery": {
-   "producer": "run(deep_escalation=...) — operator-only: cli --reason/--expect builds OperatorEscalation (cli/one_shot.py:101-107)",
+   "producer": "run(deep_escalation=...) — operator-only: cli --reason/--expect builds OperatorEscalation (cli/one_shot.py:45-45)",
    "carrier": "parameter chain run -> _run_inner -> _observe_and_route -> model_router.for_task(escalation=...) for BOTH roles (core/loop_observe.py:106,159)",
    "consumer": "for_task tier decision: a DEEP request without a valid operator reason downgrades to standard — the agent can never open the deep tier for itself",
    "effect_level": "L4 at the router (model choice); tier semantics owned by core/deep_escalation.decide and its 20+ unit tests",
@@ -1094,10 +1094,10 @@
   "_arc_rule": "FORMAL, second edition (operator's review 2026-08-08 caught a circularity in the first: if dependence had to be PROVEN for the arc to exist, an unproven nerve could hide behind 'no dependence established, so no arc yet'). EXISTENCE and STATUS are separate questions. A CANDIDATE ARC exists wherever a value actually crosses a phase or module boundary and enters a consumer — no proof of effect required; entering the queue is what makes the effect investigable. STATUS then grades the proof: UNPROVEN — dependence not yet shown; PARTIAL — part of the causal chain proven (e.g. delivery yes, effect mock-blind: the prompt_to_model family is PARTIAL by construction); PROVEN — dependence + semantics + protection shown; DEAD — absence of causal effect proven. An arc ends at the last consumer provable without a live model; hops into a live model form their own PARTIAL arcs. Granularity notes may group physical sites; they never delete a candidate. CLAUSE SHARPENED 2026-08-08 after the operator made me defend turn_context_read: a granularity note may group ONLY the physical sites of the SAME value -> SAME consumer-contract pair (several call sites delivering one routed model to one planner contract, say). Different VALUES or different CONSUMERS are different candidate arcs however tidy it would be to group them — the rule needed no weakening, it had been violated: one record had held prompt blocks, a suppression flag and a durable stats write under a single CERTIFIED verdict, and one of those consumers had never been tested. goal -> retrieval (C15) is the standing example of the other half of the rule: a candidate arc held as UNPROVEN precisely because its dependence is not yet shown.",
   "_mandate": "Operator mandate 2026-08-08: dissect, prove and certify the whole CNS runtime control path. Clusters follow the REAL execution graph from runtime entry points, never file order. Statuses from path_statuses; UNPROVEN never becomes an assumption; a call edge is never a proven signal flow. A cluster is closed only when its report (SCOPE -> EXECUTION PATH -> SIGNALS/STATE -> OWNERSHIP -> FAILURE SEMANTICS -> TEST EVIDENCE -> MUTATION EVIDENCE -> VERDICT -> NEXT EDGE) exists and its critical contracts have proven bites. This ledger is the work queue and the proof journal, not the goal.",
   "entry_points": [
-   "cli/repl.py:234 -> app/budget_guard._run_agent_with_budget_guard -> AgentLoop.run (dialogue)",
-   "cli/one_shot.py:111 -> same wrapper (one-shot)",
+   "cli/repl.py:211 -> app/budget_guard._run_agent_with_budget_guard -> AgentLoop.run (dialogue)",
+   "cli/one_shot.py:45 -> same wrapper (one-shot)",
    "api/server.py -> AgentLoop.run under _run_lock (serialised HTTP)",
-   "agent_tick.py:964 -> runtime.run(config) (autonomous contour)",
+   "agent_tick.py:726 -> runtime.run(config) (autonomous contour)",
    "app/daemon.py, app/worker_pool.py (scheduler contour over the same loop)"
   ],
   "clusters": [
@@ -1306,13 +1306,13 @@
     "opened": "2026-08-14",
     "knowability": {
      "_question": "The operator's question, asked before any classification: after launch and with no operator input, can this contour choose useful work? Three sub-questions, three answers from code and from the live workspace.",
-     "where_the_contour_gets_work": "EXACTLY ONE call site in the repository puts a task into the queue: core/scheduler.py:205, inside SchedulerStore.tick(), and it converts a DUE SCHEDULE into a task. Schedules have exactly one producer, SchedulerStore.add (core/scheduler.py:130), reached only from _handle_schedule_add (app/task_scheduler_cli.py:292) — the operator's :schedule-add. Enumerated, not assumed: no enqueue exists in api/server.py (the file holds no queue reference at all), none in the campaign path, none in self-build, and none in agent_tick.py itself. So every unit of autonomous work traces back to an operator command.",
+     "where_the_contour_gets_work": "EXACTLY ONE call site in the repository puts a task into the queue: core/scheduler.py:205, inside SchedulerStore.tick(), and it converts a DUE SCHEDULE into a task. Schedules have exactly one producer, SchedulerStore.add (core/scheduler.py:130), reached only from _handle_schedule_add (app/task_scheduler_cli.py:288) — the operator's :schedule-add. Enumerated, not assumed: no enqueue exists in api/server.py (the file holds no queue reference at all), none in the campaign path, none in self-build, and none in agent_tick.py itself. So every unit of autonomous work traces back to an operator command.",
      "what_the_contour_holds_when_it_starts": "Measured on the live workspace 2026-08-14, not read off comments: data/runtime_schedules.jsonl is 0 rows, and TaskQueueStore.pending() against the real store returns 0 tasks (13 rows present, none pending — pending() honours run_after and status). Step 1 of run_tick therefore enqueues nothing and step 2 claims nothing. build_agent sits inside the `else` of `if not pending_tasks`, so with an empty queue the agent is never built, AutonomousRuntime is never constructed, and the loop never runs. The tick logs no_pending_tasks and performs only the approval-inbox check. This is the shipped configuration, not a broken one.",
-     "was_the_choice_of_work_knowable": "YES, mechanically. select_best_next_action (core/best_next_action.py:85) is pure — it takes structured signals and returns exactly one BestNextAction, always, including 'just observe'. Its consumers are cli/commands_approval.py:143 (an operator command) and core/campaign_io.py:58 (the --campaign mode). It is NOT reached from agent_tick.py or run_tick. So the deciding value is computable at precisely the point where the tick concludes it has nothing to do, and no arc carries it there. Its own docstring forbids the other half: 'pure and advisory ... never executes the action'.",
+     "was_the_choice_of_work_knowable": "YES, mechanically. select_best_next_action (core/best_next_action.py:85) is pure — it takes structured signals and returns exactly one BestNextAction, always, including 'just observe'. Its consumers are cli/commands_approval.py:125 (an operator command) and core/campaign_io.py:58 (the --campaign mode). It is NOT reached from agent_tick.py or run_tick. So the deciding value is computable at precisely the point where the tick concludes it has nothing to do, and no arc carries it there. Its own docstring forbids the other half: 'pure and advisory ... never executes the action'.",
      "what_this_does_not_establish": "That any of it is a defect. The contour was SPECIFIED as scheduler-driven: agent_tick.py's header states the six steps of a tick and step 1 is 'load scheduler store -> find schedules that are due'. Choosing work is not among the six. Making the tick a consumer of best_next_action would be a contract change and is the operator's call. No defect claimed, no runtime change in this unit."
     },
     "census": {
-     "entry": "docker/daemon_loop.py:38 builds [python, agent_tick.py, --workspace, <ws>] — no --campaign flag, so the production daemon always enters run_tick, never run_paced_campaign (agent_tick.py:1239).",
+     "entry": "docker/daemon_loop.py:33 builds [python, agent_tick.py, --workspace, <ws>] — no --campaign flag, so the production daemon always enters run_tick, never run_paced_campaign (agent_tick.py:909).",
      "modules": [
       "agent_tick.py (1486)",
       "core/autonomous_runtime.py (1495)",
@@ -1326,7 +1326,7 @@
       "data/daemon.lock": "0 rows",
       "data/incidents.jsonl": "absent"
      },
-     "two_store_defect_closed": "The tick and the CLI address the SAME files — SCHEDULES_PATH (agent_tick.py:63) and DEFAULT_RUNTIME_SCHEDULES_PATH (app/bootstrap.py:47) both resolve to data/runtime_schedules.jsonl; TASK_QUEUE_PATH (agent_tick.py:75) is DEFAULT_RUNTIME_TASKS_PATH (core/task_queue.py:25). Verified this pass, since the historical failure here was a task pending in one store and invisible to the process meant to run it.",
+     "two_store_defect_closed": "The tick and the CLI address the SAME files — SCHEDULES_PATH (agent_tick.py:29) and DEFAULT_RUNTIME_SCHEDULES_PATH (app/bootstrap.py:47) both resolve to data/runtime_schedules.jsonl; TASK_QUEUE_PATH (agent_tick.py:36) is DEFAULT_RUNTIME_TASKS_PATH (core/task_queue.py:25). Verified this pass, since the historical failure here was a task pending in one store and invisible to the process meant to run it.",
      "default_posture": "AGENT_TICK_DRY_RUN defaults to '1' (agent_tick.py header) and the live status reads 'Mode: dry_run (effects=disabled)'. An autonomous contour forbidden effects is an observer; whether to lift that is a separate operator decision from wiring the work-choice arc."
     },
     "candidate_arcs": [

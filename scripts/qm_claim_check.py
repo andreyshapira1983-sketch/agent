@@ -1,28 +1,4 @@
-"""EXPERIMENTAL validator for ONE claim certificate. Not production, not a schema.
-
-The property under test is AUTHORITY: the semantic decisions live in the `.qm`
-file and are executed here, not duplicated here. This file knows *how* to run an
-evaluation, bind evidence to it, resolve environment sources and apply an ordered
-rule list. It does not know which command, which carrier, which event, which
-projection, which environment keys, or in what precedence -- all of that is read.
-Change a fact in the certificate and this program behaves differently.
-
-Three checks, in order, because they fail differently:
-
-  1. EVIDENCE BINDING -- the observation must come from the evaluation this run
-     launched, and must be the record the certificate names. A workspace can
-     already hold journals from earlier runs; reading the wrong one would make the
-     verdict a coincidence.
-  2. DEPENDENCY MODEL -- the certificate's ordered rules predict a value before
-     the observation is compared. If prediction and observation disagree, the
-     CERTIFICATE is defective, and that is reported even when the claim holds.
-  3. THE CLAIM -- only then is the observed value compared with the expected one.
-
-Exit codes follow the certificate's own vocabulary:
-    0 VALID   1 INVALID   2 OUT_OF_DOMAIN   3 PRECEDENCE_VIOLATED   4 UNREADABLE
-
-Usage:  python scripts/qm_claim_check.py knowledge/quantum/c2.claim.qm [--workspace DIR]
-"""
+"""Experimental validator of one .qm claim certificate: evidence, dependency model, claim."""
 from __future__ import annotations
 
 import json
@@ -87,9 +63,7 @@ def _predict(cert: dict, env: dict[str, str]) -> tuple[str, object]:
         if raw is _ABSENT:
             return rule["id"], src.get("default", _ABSENT)
         if "map" in src:
-            # The mapping from a raw string to a semantic value is a fact about
-            # the variable, so the certificate carries it. Anything unmapped is
-            # left raw and will surface as a mismatch rather than a guess.
+            # An unmapped value stays raw, so it surfaces as a mismatch, not a guess.
             return rule["id"], src["map"].get(str(raw).strip().lower(), raw)
         return rule["id"], raw
     return "<no rule matched>", _ABSENT
@@ -124,9 +98,7 @@ def main(argv: list[str]) -> int:
 
     env, origin = _resolve_env(cert, workspace)
 
-    # Declared preconditions of the evaluation domain. An unmet precondition is
-    # not a false claim: the claim says nothing about that environment, and
-    # answering VALID or INVALID there would be answering a question nobody asked.
+    # An unmet precondition is out of domain, not a false claim.
     for pre in cert["evaluation_domain"].get("preconditions", []):
         key = pre.get("env_absent") or pre.get("env_present")
         present = key in env
@@ -138,7 +110,7 @@ def main(argv: list[str]) -> int:
 
     rule_id, predicted = _predict(cert, env)
 
-    # Evidence binding, part 1: what existed BEFORE this evaluation.
+    # Evidence binding: carriers that existed before this evaluation.
     before = set(workspace.glob(obs["carrier_glob"]))
     proc = subprocess.run(
         [sys.executable, *command, "--workspace", str(workspace)],
@@ -205,9 +177,7 @@ def main(argv: list[str]) -> int:
     return INVALID
 
 
-#: Emitted as the last stdout line so a caller can tell "this program produced a
-#: verdict" from "this program failed". An exit code alone cannot carry that
-#: difference: a crash, a syntax error and a missing file all look like a verdict.
+#: The last stdout line, so a caller can tell a verdict from a crash; exit codes alone collide.
 _VERDICT_MARKER = "QM-VERDICT:"
 
 if __name__ == "__main__":

@@ -1,19 +1,5 @@
 #!/usr/bin/env python3
-"""MIR-060: does a resolved citation decide the verdict, whatever the claim says?
-
-ЧТО БЫЛО НЕ ТАК С ПРЕДЫДУЩЕЙ ВЕРСИЕЙ. Она была написана против выдуманного API
-(`Verifier`, `EvidenceRegistry`, `Claim`, `verify_claim`) — ничего этого в коде
-нет, и запуск падал на первом импорте. Замысел шести случаев верный, поэтому он
-сохранён; исполнение переписано под настоящий контракт `core.verifier.verify`.
-
-ЧТО ЭТО МЕРЯЕТ. Для каждого случая известна ИСТИНА (поддерживает ли улика
-утверждение), и отдельно — вердикт верификатора. Дефект воспроизведён там, где
-ссылка разрешилась, истина «нет», а вердикт «verified».
-
-БЕЗОПАСНОСТЬ. Чистое чтение: собственная цепочка улик в памяти, ни одного
-обращения к рабочим хранилищам, ни одной записи в обучение. Временные файлы
-живут в каталоге эксперимента и удаляются в конце.
-"""
+"""Experiment: does a resolved citation get a claim verified that its evidence does not support?"""
 from __future__ import annotations
 
 import json
@@ -35,7 +21,7 @@ def _chain(*evidences) -> ProvenanceChain:
 
 
 def _answer(claim: str, citation: str) -> str:
-    """Ответ в форме контракта вывода — иначе разбор не найдёт утверждений."""
+    """Answer in the output-contract form; otherwise the parser finds no claims."""
     return (
         f"Conclusion: {claim} [{citation}]\n"
         f"Facts:\n- {claim} [{citation}]\n"

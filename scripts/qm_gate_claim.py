@@ -1,38 +1,9 @@
 """ONE operation: turn a claim certificate into a gate status for a bound state.
 
-First file built under the one-operation rule. It holds exactly one behavioral
-callable, `gate`. The `__main__` block below is an entry shim, not a second
-operation: it parses two arguments and prints what `gate` returned.
-
-    input / preconditions   a certificate path, and the claim id the caller
-                            expects that certificate to carry
-    operation               resolve the certificate, check its identity, and
-                            re-evaluate it -- never read a cached verdict
-    output / carrier        one status: USABLE, UNAVAILABLE or UNRESOLVABLE
-    named consumer          scripts/qm_link_check.py, in both the certified-claim
-                            walk and the producer-binding deferral
-
-Why it exists as its own file: the two consumers above each had their own copy of
-this logic, so a change to the gate had two places to go wrong and the graph had
-no single answer to "may this state be used?". Extracting it makes the gate one
-observable decision with one carrier.
-
-The three statuses are not interchangeable.
-
-    USABLE        the certificate mechanism ran and established the state.
-    UNAVAILABLE   the mechanism RAN TO COMPLETION and did not establish a usable
-                  state in this evaluation. That covers a false claim and an
-                  evaluation outside the certificate's declared domain: both are
-                  trustworthy answers about the state. It does NOT mean "the claim
-                  was false", and it is never used when the mechanism itself was
-                  unsound.
-    UNRESOLVABLE  no trustworthy verdict exists. The certificate or its identity is
-                  missing, the validator did not run or did not declare a verdict,
-                  its declaration disagrees with its exit code, the certificate is
-                  unreadable, or the certificate's own dependency model was
-                  contradicted by the observation. The last case is a defect of the
-                  CERTIFICATE, not a refusal by it, and collapsing it into
-                  UNAVAILABLE would let a broken semantic model look like a decision.
+    input / preconditions   a certificate path and the claim id it should carry
+    operation               resolve, check identity, re-evaluate (never a cached verdict)
+    output / carrier        USABLE, UNAVAILABLE or UNRESOLVABLE
+    named consumer          scripts/qm_link_check.py
 """
 from __future__ import annotations
 
@@ -43,17 +14,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-#: What the claim validator's exit codes mean. Kept here because this operation
-#: is the only thing that interprets them.
+#: The claim validator's verdict line and exit codes; only this operation interprets them.
 _VERDICT_MARKER = "QM-VERDICT:"
 
 _CLAIM_STATUS = {0: "VALID", 1: "INVALID", 2: "OUT_OF_DOMAIN",
                  3: "PRECEDENCE_VIOLATED", 4: "UNREADABLE"}
 
-#: Every declared verdict maps here explicitly. Two of them used to fall through
-#: to UNAVAILABLE and were measured doing so: PRECEDENCE_VIOLATED says the
-#: certificate's own dependency model was contradicted, and UNREADABLE says no
-#: verdict was formed at all. Neither is a refusal, so neither may look like one.
+#: Every declared verdict is mapped explicitly. PRECEDENCE_VIOLATED (the certificate's own
+#: model was contradicted) and UNREADABLE (no verdict formed) are not refusals.
 _GATE_MAPPING = {
     "VALID": "USABLE",
     "INVALID": "UNAVAILABLE",
@@ -84,10 +52,8 @@ def gate(certificate: Path, claim_id: str) -> tuple[str, str]:
         capture_output=True, text=True, encoding="utf-8", timeout=900, cwd=str(ROOT),
         check=False,
     )
-    # PROVENANCE. An exit code proves nothing about where it came from: a crash, a
-    # syntax error, a missing file and a deliberate refusal all arrive as integers.
-    # UNAVAILABLE is reserved for "the mechanism ran and the certificate refused",
-    # so the verdict must be DECLARED by the validator and must agree with its code.
+    # An exit code alone proves nothing (a crash is an integer too): UNAVAILABLE needs a
+    # verdict the validator declared, agreeing with its exit code.
     declared = [line.split(":", 1)[1].strip()
                 for line in (proc.stdout or "").splitlines()
                 if line.startswith(_VERDICT_MARKER)]

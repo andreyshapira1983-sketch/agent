@@ -1,7 +1,4 @@
-"""Перепись решающей власти — семейство A, уровень «след детектора».
-
-Замер, отвергнутые варианты и границы: MIR-115 в docs/audit/MASTER_ISSUE_REGISTRY.md.
-"""
+"""Census of decision authority, family A (detector level): literals that rank or order work."""
 from __future__ import annotations
 
 import argparse
@@ -14,27 +11,20 @@ import sys
 _ROOTS = ("core", "app", "cli", "api", "tools")
 _EXTRA_FILES = ("agent_tick.py", "main.py")
 
-#: Имена, чей литерал ранжирует или упорядочивает работу.
+#: Names whose literal value ranks or orders work.
 _RANKING_NAME = re.compile(
     r"(^_?P_|PRIORITY|PRIO|_ORDER$|_ORDER_|ORDERED|_RANK|WEIGHT|_W_|SEVERITY)",
     re.IGNORECASE,
 )
 
-#: Слова, по которым место относится к НАЗЫВАНИЮ, ПРОИЗВОДСТВУ или
-#: УПОРЯДОЧИВАНИЮ действия — фильтр достижимости из метода.
+#: Reachability filter: words tying a site to naming, producing or ordering an action.
 _ACTION_WORDS = re.compile(
     r"(action|task|candidate|step|plan|queue|goal|tool|command|dispatch|route|"
     r"select|choose|rank|proposal|repair)",
     re.IGNORECASE,
 )
 
-#: Имена СЛОВАРЕЙ — наборов слов для сопоставления, а не упорядоченной работы.
-#: Введены после ручной выборки первого прогона 2026-08-24: из 16 проверенных
-#: следов 13 оказались словарями (`_LEARNING_TERMS`, `_APPROVAL_STRONG`,
-#: `_PLACEHOLDER_TLDS`), то есть 81 % ложных. Метод требует выбирать ложные
-#: срабатывания РУКАМИ до публикации числа — это и есть результат той выборки.
-#: Сужение бьёт по A2 и A4, а не по A1: A1 нашёл таблицу приоритетов и в
-#: выборке ложных не дал.
+#: Vocabulary names: word sets for matching, not ordered work (excluded after hand review).
 _VOCABULARY_NAME = re.compile(
     r"(_TERMS$|_TERMS_|TERMS$|_MARKERS|_WORDS|_PATTERNS|_TLDS|_SUBSTR|"
     r"_QUALIFIERS|_PREFIXES|_SUFFIXES|_KEYWORDS|_PHRASES|_SYNONYMS|_STOP|"
@@ -42,10 +32,7 @@ _VOCABULARY_NAME = re.compile(
     re.IGNORECASE,
 )
 
-#: РЕСУРСНЫЕ потолки: меняют, что ВОЗМОЖНО, а не что ВЫБРАНО — класс
-#: «способность» по таблице метода. Вторая ручная выборка поймала здесь
-#: `_ORDER_TOKEN_CAP` — предел стоимости сравнения, пойманный по совпадению
-#: имени с `_ORDER_`.
+#: Resource ceilings change what is possible, not what is chosen, so they are skipped.
 _RESOURCE_NAME = re.compile(r"(_CAP$|_CAP_|_BYTES|_CHARS|_TIMEOUT|_SECONDS)", re.IGNORECASE)
 
 
@@ -70,7 +57,7 @@ def _files(repo: pathlib.Path) -> list[pathlib.Path]:
 
 
 def _action_context(source_line: str, module_head: str) -> bool:
-    """Фильтр достижимости: место должно течь в называние/производство/порядок."""
+    """Reachability filter: the site must feed naming, producing or ordering an action."""
     return bool(_ACTION_WORDS.search(source_line) or _ACTION_WORDS.search(module_head))
 
 
@@ -96,7 +83,7 @@ def scan_file(path: pathlib.Path, repo: pathlib.Path) -> list[_Hit]:
                 if not isinstance(t, ast.Name) or not _RANKING_NAME.search(t.id):
                     continue
                 if _RESOURCE_NAME.search(t.id):
-                    continue  # потолок ресурса: меняет ВОЗМОЖНОЕ, не ВЫБРАННОЕ
+                    continue  # resource ceiling: changes what is possible, not what is chosen
                 v = node.value
                 if (
                     isinstance(v, ast.Constant)
@@ -116,7 +103,7 @@ def scan_file(path: pathlib.Path, repo: pathlib.Path) -> list[_Hit]:
                 t0 = node.targets[0]
                 name = t0.id if isinstance(t0, ast.Name) else ""
                 if name and _VOCABULARY_NAME.search(name):
-                    continue  # словарь сопоставления, а не список работ
+                    continue  # a matching vocabulary, not a list of work
                 src = line_of(node)
                 if name and _action_context(src + " " + name, head):
                     hits.append(_Hit(rel, node.lineno, "A2:ordered-literal-list",
@@ -146,17 +133,15 @@ def scan_file(path: pathlib.Path, repo: pathlib.Path) -> list[_Hit]:
                 and not isinstance(c.value, bool)
             ):
                 src = line_of(node)
-                # A4 сужен ручной выборкой: сравнение должно РАНЖИРОВАТЬ, а не
-                # обрезать вывод (`len(goals) > 5`) и не ветвить поток
-                # (`len(steps) == 1`). Требуется имя ранга рядом со сравнением.
+                # A4 requires a rank name nearby: the comparison must rank, not trim
+                # output (`len(goals) > 5`) or branch (`len(steps) == 1`).
                 if _ACTION_WORDS.search(src) and _RANKING_NAME.search(src):
                     hits.append(_Hit(rel, node.lineno, "A4:literal-comparison",
                                      "", src[:110]))
     return hits
 
 
-#: Контроли метода. Положительные детектор ОБЯЗАН найти; известный
-#: положительный он обязан ПРОПУСТИТЬ — иначе слепой класс заявлен, а не измерен.
+#: Controls: the detector must find these positives and must miss _MUST_MISS (a blind class).
 _POSITIVE_CONTROLS = {
     "core/autonomous_runtime.py": "_build_queue — порядок работ из литералов",
     "core/best_next_action.py": "таблица приоритетов кандидатов",

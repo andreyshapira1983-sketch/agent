@@ -1,21 +1,4 @@
-"""EXPERIMENTAL coherence probe for the quantum lab notes. Not production.
-
-The question it answers is narrow: does a document assert two incompatible
-things about one subject, or state a count that its own enumeration contradicts?
-It is NOT told which sentence is stale. It has no authoritative copy to compare
-against. It finds disagreement structurally, from the text alone, which is the
-only version of the check that is evidence rather than bookkeeping.
-
-Two rules, because the lab produced exactly two specimens of the disease:
-
-  R1 STATUS COHERENCE   one subject carrying both an alive-class and a
-                        dead-class status word.
-  R2 COUNT COHERENCE    a spelled-out number introducing an enumeration whose
-                        expanded membership has a different size.
-
-Exit 0 clean, 1 if any incoherence is found, 2 if a file cannot be read.
-Usage:  python scripts/qm_doc_coherence.py [file.md ...]
-"""
+"""Experimental check of quantum lab notes for contradictory statuses (R1) and counts (R2)."""
 from __future__ import annotations
 
 import re
@@ -36,15 +19,7 @@ COUNT_ENUM = re.compile(
 
 
 def _sentences(text: str) -> list[tuple[int, str]]:
-    """Sentences over PARAGRAPHS, not lines.
-
-    The first version of this probe worked line by line and found nothing. The
-    diagnosis is the finding: in the specimen document the count `Seven
-    constraints` sat at the end of one line and its enumeration `(E1, E3-E7)` at
-    the start of the next, so a line-scoped check could not see them together.
-    Derived assertions are not textually adjacent to what they derive from --
-    which is precisely why this class of staleness survives proofreading.
-    """
+    """Sentences over paragraphs, not lines: a count and its enumeration may straddle a line."""
     out: list[tuple[int, str]] = []
     for lineno, para in _paragraphs(text):
         for part in re.split(r"(?<=[.;:])\s+", para):
@@ -54,15 +29,7 @@ def _sentences(text: str) -> list[tuple[int, str]]:
 
 
 def _paragraphs(text: str) -> list[tuple[int, str]]:
-    """Whitespace-normalised paragraphs with their true starting line.
-
-    Rosters are read at paragraph granularity on purpose. Sentence splitting cut
-    `There are exactly three candidates:` away from `**2** (current)`, so the
-    subject word and the status label ended up in different fragments and the
-    named specimen stayed invisible even after the probe started biting
-    elsewhere. Recorded because it is the same disease one level down: the
-    detector's own scope was narrower than the fact it had to see.
-    """
+    """Whitespace-normalised paragraphs with their true starting line."""
     out: list[tuple[int, str]] = []
     lineno = 1
     for para in re.split(r"(\n\s*\n)", text):
@@ -93,34 +60,22 @@ def _expand(enum: str) -> set[str]:
 
 
 def _strip_quotations(text: str) -> str:
-    """Blank out fenced blocks and inline code spans -- MENTION, not USE.
-
-    Found the hard way: the note's own specimen section quotes the two
-    contradictions verbatim as evidence, and the probe lit up on the quotations.
-    A structural detector has no notion of use versus mention, so the document
-    has to mark it. Backticks are that mark, and blanking rather than deleting
-    keeps every line number intact.
-    """
+    """Blank out fenced blocks and inline code spans (quoted, not asserted); keeps line numbers."""
     blank = lambda m: re.sub(r"[^\n]", " ", m.group(0))  # noqa: E731
     text = re.sub(r"```.*?```", blank, text, flags=re.DOTALL)
-    # Inline spans may WRAP: prose reflows and a quotation ends up straddling a
-    # newline. The first version forbade newlines inside a span, so a wrapped
-    # quotation stayed live and the probe fired on its own evidence a second
-    # time -- the same use/mention failure, surviving one fix because the fix
-    # assumed quotations do not wrap.
+    # Inline spans may wrap across a newline, so the pattern allows newlines inside.
     return re.sub(r"`[^`]*`", blank, text)
 
 
 def check(path: Path) -> list[str]:
+    """Return R1/R2 findings for one Markdown file."""
     text = _strip_quotations(path.read_text(encoding="utf-8"))
     findings: list[str] = []
 
     # R1 -- status coherence per subject
     seen: dict[str, dict[str, list[tuple[int, str]]]] = {}
-    # A roster names several subjects at once, each with its status in
-    # parentheses: "candidates: **0** (file-centric), **2** (current)". Read at
-    # PARAGRAPH granularity -- the word "candidate" and the bolded numerals sit
-    # in different sentences.
+    # Rosters ("candidates: **0** (file-centric), **2** (current)") are read per paragraph:
+    # the word "candidate" and the bolded numerals sit in different sentences.
     for lineno, para in _paragraphs(text):
         if "candidate" not in para.lower():
             continue
@@ -131,12 +86,7 @@ def check(path: Path) -> list[str]:
                     seen.setdefault(f"Candidate {num}", {}).setdefault(
                         cls, []).append((lineno, label))
 
-    # A heading naming a subject SCOPES the prose under it until the next heading
-    # of the same level. Without this the probe's recall was limited to status
-    # words sharing a sentence with the subject's name, and the bite test proved
-    # it: an injected "Candidate 1 is the current surviving model" raised nothing,
-    # because candidate 1's death is asserted in a sentence that does not repeat
-    # its name. A status inherited from a heading was invisible.
+    # A heading that names a subject scopes the lines under it until the next heading.
     section: str | None = None
     for lineno, line in enumerate(text.splitlines(), start=1):
         head = re.match(r"^(#{2,3})\s+(.*)$", line)
@@ -176,6 +126,7 @@ def check(path: Path) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
+    """Check files (default: SUBJECT_MODEL.md); exit 0 clean, 1 incoherent, 2 unreadable."""
     targets = [Path(a) for a in argv[1:]] or [
         Path("knowledge/quantum/SUBJECT_MODEL.md")]
     all_findings: list[str] = []

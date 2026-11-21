@@ -1,22 +1,4 @@
-"""Explicit ``:command`` dispatch for the operator REPL and one-shot mode.
-
-``handle_meta_command`` is the single ordered ``if head == …`` chain that turns a
-typed ``:command`` into a call on one of the handler modules. It was extracted
-verbatim from ``main.py``. Import it from here -- ``main.py`` re-exported it
-until Phase 7 removed the whole compatibility block; the REPL, one-shot and the
-suites all reach it through this module now.
-
-It owns *routing only*. Every command's behaviour lives in the module the branch
-calls -- ``cli/commands_*.py``, ``app/*_cli.py``, ``app/operator_status.py``,
-``cli/help.py``. Nothing here reads or writes agent state directly.
-
-Two things deliberately do **not** live here:
-
-* the REPL's own block tokens (``:task-begin``/``:task-end``/``:task-abort``,
-  ``:operator-task``/``:end``) are intercepted by the REPL loop before dispatch;
-* the two pre-``load_dotenv()`` fast paths (``:self-build-propose``,
-  ``:schedule-disable``) are handled in ``main()`` before an agent exists.
-"""
+"""Ordered ``:command`` dispatch chain for the operator REPL and one-shot mode (routing only)."""
 from __future__ import annotations
 
 import json
@@ -144,11 +126,9 @@ if TYPE_CHECKING:  # annotations only
 
     from core.loop import AgentLoop
 
-def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:  # noqa: PLR0911, PLR0912, PLR0915 — flat: depth 4, all 94 returns are guard clauses
+def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:  # noqa: PLR0911, PLR0912, PLR0915 — flat chain, every return is a guard clause
     """Returns True if the command was handled (so the REPL should skip the LLM)."""
-    # Any whitespace, not a literal space -- see the comment at the same
-    # split in `cli/app.py`. Both paths change together so the two
-    # pre-dotenv fast paths cannot diverge from the other 93 commands.
+    # Split on any whitespace, as cli/app.py's pre-dotenv fast paths do; change both together.
     _parts = cmd.split(maxsplit=1)
     head = _parts[0] if _parts else ""
     rest = _parts[1] if len(_parts) > 1 else ""
@@ -506,7 +486,7 @@ def handle_meta_command(cmd: str, agent: AgentLoop, workspace: Path) -> bool:  #
     if head in {":quit", ":exit"}:
         raise SystemExit(0)
 
-    if head in {":assumptions", ":assumption-log"}:  # Layer 5
+    if head in {":assumptions", ":assumption-log"}:
         return _handle_assumptions(rest.strip(), agent)
 
     return False

@@ -1,4 +1,4 @@
-"""Команды оператора для внешних источников-коннекторов."""
+"""Operator commands for external source connectors."""
 from __future__ import annotations
 
 import json
@@ -12,7 +12,7 @@ from core.source_connectors import (
     source_connector_payload,
 )
 
-if TYPE_CHECKING:  # pragma: no cover — только для подписи
+if TYPE_CHECKING:  # pragma: no cover — signatures only
     pass
 
 
