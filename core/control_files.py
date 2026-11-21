@@ -21,7 +21,7 @@ def control_file_hit(workspace_root: Path, target: Path) -> str | None:
     root = Path(workspace_root).resolve()
     resolved = Path(target).resolve()
     try:
-        folded = tuple(p.casefold() for p in resolved.relative_to(root).parts)
+        folded = tuple(_fold(p) for p in resolved.relative_to(root).parts)
     except ValueError:
         folded = ()
     for rel in CONTROL_RELPATHS:
@@ -29,10 +29,17 @@ def control_file_hit(workspace_root: Path, target: Path) -> str | None:
         for candidate in (guarded, guarded.with_name(guarded.name + ".tmp")):
             if resolved == candidate or _same_file(resolved, candidate):
                 return rel
-        rel_folded = tuple(p.casefold() for p in Path(rel).parts)
+        rel_folded = tuple(_fold(p) for p in Path(rel).parts)
         if folded in (rel_folded, (*rel_folded[:-1], rel_folded[-1] + ".tmp")):
             return rel
     return None
+
+
+def _fold(part: str) -> str:
+    """A name compared the way the file system may read it: case-folded, and on Windows without a stream suffix or trailing dots and spaces."""
+    if os.name == "nt":
+        part = part.split(":", 1)[0].rstrip(" .") or part
+    return part.casefold()
 
 
 def _same_file(a: Path, b: Path) -> bool:

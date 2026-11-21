@@ -243,14 +243,14 @@ def _overlaps(target: Path, home: Path, workspace_root: Path, *, inside_too: boo
     return False
 
 
-def _walk_links(start: Path, limit: int = 100) -> tuple[list[Path], Path]:
-    """Resolve `start` component by component, as the OS does: every link entry passed on the way, and where it ends."""
+def _walk_links(start: Path, limit: int = 256) -> tuple[list[Path], Path]:
+    """Resolve `start` component by component, as the OS does: every link entry passed and where it ends; a walk too long to finish raises (fail closed)."""
     parts = list(start.parts)
     current = Path(parts.pop(0))
     links: list[Path] = []
     for _ in range(limit):
         if not parts:
-            break
+            return links, current
         part = parts.pop(0)
         if part in ("", "."):
             continue
@@ -258,60 +258,89 @@ def _walk_links(start: Path, limit: int = 100) -> tuple[list[Path], Path]:
             current = current.parent
             continue
         nxt = current / part
-        if _is_link(nxt):
-            links.append(nxt)
-            raw = os.readlink(nxt).removeprefix("\\\\?\\")
-            raw_parts = list(Path(raw).parts)
-            if os.path.isabs(raw):
-                current = Path(raw_parts.pop(0))
-            parts = raw_parts + parts
+        if not _is_link(nxt):
+            current = nxt
             continue
-        current = nxt
-    return links, current
+        links.append(nxt)
+        raw = os.readlink(nxt).removeprefix("\\\\?\\")
+        if _WINDOWS:  # Windows joins a link target to the link's folder and collapses '..' as text
+            rest = list(Path(os.path.normpath(os.path.join(str(current), raw, *parts))).parts)
+            current, parts = Path(rest[0]), rest[1:]
+        elif os.path.isabs(raw):
+            rest = list(Path(raw).parts)
+            current, parts = Path(rest[0]), rest[1:] + parts
+        else:
+            parts = list(Path(raw).parts) + parts
+    raise OSError(f"the link chain under {start} is too long to judge")
 
 
-def _gitdir_target(path: Path) -> Path | None:
-    """The path a 'gitdir: <path>' file points to, else None."""
+def _gitdir_targets(gitfile: Path, opened_from: Path) -> list[Path]:
+    """Where a 'gitdir: <path>' file points; a relative path is taken from the folder that holds the .git entry (as git does) and, to be safe, from the file's own folder."""
     try:
-        if not path.is_file():
-            return None
-        first = path.read_text(encoding="utf-8", errors="replace").strip().splitlines()[:1]
+        if not gitfile.is_file():
+            return []
+        first = gitfile.read_text(encoding="utf-8", errors="replace").strip().splitlines()[:1]
     except _ABSENT:
-        return None
+        return []
     if not first or not first[0].startswith("gitdir:"):
-        return None
+        return []
     pointed = first[0][len("gitdir:"):].strip()
-    return Path(pointed) if os.path.isabs(pointed) else path.parent / pointed
+    if os.path.isabs(pointed):
+        return [Path(pointed)]
+    return list(dict.fromkeys([opened_from / pointed, gitfile.parent / pointed]))
 
 
-def _guarded(workspace_root: Path) -> list[tuple[str, Path, bool]]:
-    """(root name, entry, inside_too) for every link a protected root or the git data depends on, and where each ends."""
+def _links_inside(directory: Path) -> list[Path]:
+    """Every link entry at any depth inside `directory`, never descending through a link (os.walk would enter junctions)."""
+    found: list[Path] = []
+    stack = [directory]
+    while stack:
+        with os.scandir(stack.pop()) as entries:
+            for e in entries:
+                path = Path(e.path)
+                if e.is_symlink() or (e.is_dir(follow_symlinks=False) and _is_link(path)):
+                    found.append(path)
+                elif e.is_dir(follow_symlinks=False):
+                    stack.append(path)
+    return found
+
+
+def _guarded(workspace_root: Path, limit: int = 4096) -> list[tuple[str, Path, bool]]:
+    """(guarded name, entry, inside_too) for every link a protected root, a control file or the git data depends on, and where each ends."""
+    from core.control_files import CONTROL_RELPATHS
+
     out: list[tuple[str, Path, bool]] = []
-    for name in sorted(_PROTECTED_ROOTS):
-        start = workspace_root / name
+    starts = [(name, workspace_root / name) for name in sorted(_PROTECTED_ROOTS)]
+    starts += [(rel, workspace_root / rel) for rel in CONTROL_RELPATHS]
+    for name, start in starts:
         if not os.path.lexists(start):
             continue
         is_git = name == ".git"
-        pending = [start]
-        for _ in range(8):  # .git -> gitdir file -> git dir, plus links inside the git dir
-            if not pending:
-                break
-            links, home = _walk_links(pending.pop(0))
+        pending: list[tuple[Path, Path]] = [(start, start.parent)]
+        seen: set[Path] = set()
+        while pending:
+            if len(seen) >= limit:
+                raise OSError(f"too many links under {name} to judge")
+            item, opened_from = pending.pop()
+            if item in seen:
+                continue
+            seen.add(item)
+            links, home = _walk_links(item)
             out += [(name, link, False) for link in links]
             out.append((name, home, is_git))
             if not is_git:
                 continue
-            pointed = _gitdir_target(home)
-            if pointed is not None:
-                pending.append(pointed)
+            gitdirs = _gitdir_targets(home, opened_from)
+            if gitdirs:
+                pending += [(g, g.parent) for g in gitdirs]
             elif home.is_dir():
-                pending += [Path(e.path) for e in os.scandir(home) if _is_link(Path(e.path))]
+                pending += [(link, link.parent) for link in _links_inside(home)]
     return out
 
 
-def _guard_hit(workspace_root: Path, target: Path) -> str | None:
-    """The protected root whose data or link chain removing or overwriting `target` would destroy, else None."""
-    for name, entry, inside in _guarded(workspace_root):
+def _guard_hit(workspace_root: Path, target: Path, guards: list[tuple[str, Path, bool]] | None = None) -> str | None:
+    """The guarded name whose data or link chain removing or overwriting `target` would destroy, else None."""
+    for name, entry, inside in guards if guards is not None else _guarded(workspace_root):
         if _overlaps(target, entry, workspace_root, inside_too=inside):
             return name
     return None

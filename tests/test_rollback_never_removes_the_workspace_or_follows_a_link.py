@@ -561,6 +561,109 @@ def test_write_tools_refuse_the_git_data_a_gitdir_file_points_to(tmp_path) -> No
     assert list((ws / "store" / "repo" / "hooks").iterdir()) == []
 
 
+def test_a_relative_gitdir_behind_a_linked_git_is_read_from_the_workspace(tmp_path) -> None:
+    from core.compensation import touches_git
+
+    ws = tmp_path / "ws"
+    (ws / "repo").mkdir(parents=True)
+    (ws / "repo" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+    (ws / "meta").mkdir()
+    (ws / "meta" / "gitfile").write_text("gitdir: repo\n", encoding="utf-8")  # git reads it from ws, the folder holding .git
+    _symlink(ws / ".git", ws / "meta" / "gitfile")
+
+    outcome = _apply_action(CompensationAction(kind="delete_path_if_created", path="repo"), ws)
+
+    assert outcome.status == "error"
+    assert (ws / "repo" / "HEAD").exists()
+    assert touches_git(ws, ws / "repo" / "hooks" / "pre-commit")
+
+
+def test_git_data_behind_a_deep_link_inside_git_is_protected(tmp_path) -> None:
+    ws = tmp_path / "ws"
+    (ws / ".git" / "objects").mkdir(parents=True)
+    (ws / "packstore").mkdir()
+    (ws / "packstore" / "p.pack").write_text("x", encoding="utf-8")
+    _symlink(ws / ".git" / "objects" / "pack", ws / "packstore")
+
+    outcome = _apply_action(CompensationAction(kind="delete_path_if_created", path="packstore"), ws)
+
+    assert outcome.status == "error"
+    assert (ws / "packstore" / "p.pack").exists()
+
+
+def test_every_link_at_the_top_of_git_is_protected(tmp_path) -> None:
+    ws = tmp_path / "ws"
+    (ws / ".git").mkdir(parents=True)
+    for i in range(12):
+        (ws / f"s{i}").mkdir()
+        (ws / f"s{i}" / "f").write_text("x", encoding="utf-8")
+        _symlink(ws / ".git" / f"l{i}", ws / f"s{i}")
+
+    outcome = _apply_action(CompensationAction(kind="delete_path_if_created", path="s11"), ws)
+
+    assert outcome.status == "error"
+    assert (ws / "s11" / "f").exists()
+
+
+def test_a_link_chain_too_long_to_judge_fails_closed(tmp_path) -> None:
+    ws = tmp_path / "ws"
+    (ws / "store").mkdir(parents=True)
+    (ws / "store" / "live.txt").write_text("keep", encoding="utf-8")
+    (ws / "chain").mkdir()
+    previous = ws / "store"
+    for i in range(300):
+        link = ws / "chain" / f"c{i}"
+        _symlink(link, previous)
+        previous = link
+    _symlink(ws / "data", previous)
+
+    outcome = apply_compensation_plan(_delete("store"), ws).outcomes[0]
+
+    assert outcome.status == "error", outcome.detail
+    assert (ws / "store" / "live.txt").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="only Windows collapses '..' after a link as text")
+def test_a_windows_link_target_with_dotdot_guards_the_home_windows_uses(tmp_path) -> None:
+    import _winapi
+
+    ws = tmp_path / "ws"
+    (ws / "deep" / "x").mkdir(parents=True)
+    (ws / "store").mkdir()
+    (ws / "store" / "live.txt").write_text("keep", encoding="utf-8")
+    _winapi.CreateJunction(str(ws / "deep" / "x"), str(ws / "jl"))
+    try:
+        os.symlink("jl\\..\\store", ws / "data", target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"cannot create a symlink here: {exc}")
+
+    outcome = _apply_action(CompensationAction(kind="delete_path_if_created", path="store"), ws)
+
+    assert outcome.status == "error"
+    assert (ws / "store" / "live.txt").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows drops trailing dots from a name")
+def test_a_control_file_spelled_with_a_trailing_dot_is_caught(tmp_path) -> None:
+    from core.control_files import control_file_hit
+
+    ws = _workspace(tmp_path)
+
+    assert control_file_hit(ws, ws / "data" / "budget_kill_switch.json.") == "data/budget_kill_switch.json"
+
+
+def test_the_real_home_of_a_linked_control_file_is_protected(tmp_path) -> None:
+    ws = _workspace(tmp_path)
+    (ws / "vault").mkdir()
+    (ws / "vault" / "switch.json").write_text('{"tripped": true}', encoding="utf-8")
+    _symlink(ws / "data" / "budget_kill_switch.json", ws / "vault" / "switch.json")
+
+    outcome = _apply_action(CompensationAction(kind="delete_path_if_created", path="vault"), ws)
+
+    assert outcome.status == "error"
+    assert (ws / "vault" / "switch.json").exists()
+
+
 def test_two_overwrites_in_one_second_keep_the_original_backup(tmp_path, monkeypatch) -> None:
     import time
 
