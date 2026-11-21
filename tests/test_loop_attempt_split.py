@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import ast
 import subprocess  # nosec B404 — читаем историю через git show, вход фиксирован
+from dataclasses import fields as dataclass_fields
 from pathlib import Path
 
 import pytest
@@ -407,6 +408,20 @@ def test_the_loop_moved_under_one_declared_substitution():
     assert ast.dump(expected) == ast.dump(got), (
         "тело цикла отличается от истории СВЕРХ объявленной подстановки и "
         "объявленных удалений — это уже не перенос"
+    )
+
+
+def test_the_substitution_matches_the_state():
+    """Список подстановки и поля датакласса — одно и то же, в обе стороны.
+
+    Без этого предыдущий тест вырождается: расширив `SUBSTITUTED`, можно было
+    бы «объявить» любую правку частью переноса.
+    """
+    declared = {f.name for f in dataclass_fields(AttemptState)}
+    assert declared == set(SUBSTITUTED), (
+        "поля состояния разошлись со списком подстановки: "
+        f"только в датаклассе {sorted(declared - set(SUBSTITUTED))}, "
+        f"только в списке {sorted(set(SUBSTITUTED) - declared)}"
     )
 
 

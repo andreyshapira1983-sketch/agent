@@ -64,7 +64,7 @@
 | `test_mutation_probe.py:73` | `test_every_mutation_still_parses` |
 | `test_network_deny.py:89` | `test_localhost_by_name_is_still_open` |
 | `test_network_safety.py:208, 215` | сторож адреса пропускает публичный адрес и пустого собеседника |
-| `test_the_daily_snapshot_covers_every_store.py:130` | `test_a_failing_snapshot_never_stops_the_tick` |
+| `test_the_daily_snapshot_covers_every_store.py:130` | `test_a_failing_snapshot_never_stops_the_tick` (removed in the 2026-11-21 test cut) |
 | `test_the_tick_selects_on_the_pinned_engine.py:39` | `test_a_missing_env_file_is_silent` |
 | `test_the_verdict_reaches_the_author.py:82` | `test_an_in_memory_inbox_does_not_crash` |
 | `test_windows_service.py:149` | `test_validate_contract_accepts_defaults` |
@@ -79,11 +79,11 @@
 | файл:строка | причина | где выполняется |
 |---|---|---|
 | `test_shell_exec_windows_pathext.py:33, 57` | PATHEXT is Windows-only | Windows |
-| `test_run_tests_env.py:23` | PATHEXT is Windows-only | Windows |
+| `test_run_tests_env.py:23` (removed in the 2026-11-21 test cut; does not exist any more) | PATHEXT is Windows-only | Windows |
 | `test_shell_binary_resolution.py` | подмена разделителя только для `findstr` | Windows |
 | `test_the_sandbox_is_an_explicit_authority.py` | файловая система различает регистр | Windows / macOS |
 
-Истёкших `xfail` нет. Оба `xfail` (`test_recurrence_and_knowledge_gap_are_banked.py:96`, `test_minting_a_skill_has_no_judgement_of_its_own.py:84`) закреплены `until: 2026-09-30` — это через 4 дня.
+Истёкших `xfail` нет. Оба `xfail` (`test_recurrence_and_knowledge_gap_are_banked.py:96`, `test_minting_a_skill_has_no_judgement_of_its_own.py:84` (removed in the 2026-11-21 test cut; does not exist any more)) закреплены `until: 2026-09-30` — это через 4 дня.
 
 ## 2. Дубли
 
@@ -91,9 +91,9 @@
 
 | тесты | чем совпадают | что оставить |
 |---|---|---|
-| `test_a_document_goal_reaches_hands.py:70` `test_a_repair_goal_keeps_the_habitual_pick` = `test_study_turns_reading_into_hypotheses.py:35` `test_a_repair_goal_is_untouched` | Тело одно в одно, `_OPEN_ISSUE` в обоих файлах одинаковый. | Первый: у него докстринг с причиной. |
-| `test_operator_intent.py:250` `test_routes_next_actions_phrases` = `:391` `test_best_next_action_does_not_steal_next_actions_list` | Та же фраза «Что делать дальше», те же три проверки. | Второй: имя называет границу. |
-| `test_a_resolved_citation_must_be_about_the_claim.py:51` = `:140` `test_the_gate_still_fires_within_one_language` | Тот же вход «Курс акций компании вырос на 20 процентов.», тот же ожидаемый вердикт. | Первый; второй по докстрингу задуман про «один язык», но вход не отличается. |
+| `test_a_document_goal_reaches_hands.py:70` `test_a_repair_goal_keeps_the_habitual_pick` (removed in the 2026-11-21 test cut) = `test_study_turns_reading_into_hypotheses.py:35` `test_a_repair_goal_is_untouched` (removed in the 2026-11-21 test cut) | Тело одно в одно, `_OPEN_ISSUE` в обоих файлах одинаковый. | Первый: у него докстринг с причиной. |
+| `test_operator_intent.py:250` `test_routes_next_actions_phrases` (removed in the 2026-11-21 test cut) = `:391` `test_best_next_action_does_not_steal_next_actions_list` (removed in the 2026-11-21 test cut) | Та же фраза «Что делать дальше», те же три проверки. | Второй: имя называет границу. |
+| `test_a_resolved_citation_must_be_about_the_claim.py:51` = `:140` `test_the_gate_still_fires_within_one_language` (removed in the 2026-11-21 test cut) | Тот же вход «Курс акций компании вырос на 20 процентов.», тот же ожидаемый вердикт. | Первый; второй по докстрингу задуман про «один язык», но вход не отличается. |
 | `test_fast_path_verification_provenance.py:89` `test_mir002_1_…` = `:108` `test_mir002_2_verifier_error_…` | Код один в один, включая `verified_chunks=0, unverified_chunks=0`. | **Не удалять, а дописать**: по докстрингу второй тест проверяет «верификатор бросил исключение», но этот случай отдельно не моделируется. Это дыра, а не лишний тест. |
 
 ### 2б. Почти дубли: разное оформление, те же вход и ожидание
@@ -253,7 +253,7 @@
 | 5,06 | `test_except_audit_ratchet.py::test_the_zero_is_not_bought_with_fig_leaves` |
 | 4,60 | `test_except_audit_ratchet.py::test_no_new_unjustified_silent_broad_excepts` |
 | 4,44 | `test_function_length_ratchet.py::test_the_ratchet_holds` |
-| 4,26 | `test_no_test_pins_a_production_path.py::test_the_file_that_blocked_part_b_no_longer_pins_a_path` |
+| 4,26 | `test_no_test_pins_a_production_path.py::test_the_file_that_blocked_part_b_no_longer_pins_a_path` (removed in the 2026-11-21 test cut) |
 | 4,11 | `test_prose_does_not_grow.py::test_prose_does_not_grow` |
 | 4,10 | `test_the_memory_authority_probe_can_see.py::test_the_money_store_has_both_a_writer_and_a_reader` |
 | 3,85 | `test_no_test_pins_a_production_path.py::test_no_new_test_reads_shipped_code_by_a_literal_path` |
@@ -271,7 +271,7 @@
 3. Почти дубли — оставить по одному:
    - удалить `test_one_wall_must_not_evict_the_others.py:365`;
    - удалить `test_a_history_proof_outranks_the_quote_path.py:68` (оставить `test_referent_resolver.py:339`).
-4. Убрать балласт `or True` в `test_a_past_write_is_not_a_present_claim.py:79`: проверку этой строки заменить на `is None` (если это и есть ожидание) или удалить строку.
+4. Убрать балласт `or True` в `test_a_past_write_is_not_a_present_claim.py:79` (removed in the 2026-11-21 test cut; does not exist any more): проверку этой строки заменить на `is None` (если это и есть ожидание) или удалить строку.
 5. `test_loop_context_split.py:117`: параметров нет и не будет — удалить тест либо вернуть ему хотя бы один кусок.
 6. По желанию — свести в `parametrize` 85 внутрифайловых групп (218 тестов), где одна проверка гоняется на разных входах. Число проверок не уменьшится, станет меньше кода. Крупнейшие:
    - `test_shell_exec.py` — 15 запрещённых команд;

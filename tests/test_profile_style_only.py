@@ -12,8 +12,103 @@ used to narrow the current answer's scope.
 """
 from __future__ import annotations
 
+import pytest
+
+from core.user_profile import UserProfile, profile_to_prompt_block
+
+
+class TestProfilePromptBlockStyleOnly:
+    def test_block_lists_style_fields_only(self):
+        p = UserProfile(
+            expertise="expert",
+            verbosity="brief",
+            technical=True,
+            language="en",
+            interests=["python", "security", "machine_learning"],
+            interaction_count=99,
+        )
+        block = profile_to_prompt_block(p)
+        # Style fields ARE present.
+        assert "expertise: expert" in block
+        assert "verbosity: brief" in block
+        assert "vocabulary: technical" in block
+        assert "language: en" in block
+        # Domain-tied fields ARE NOT present.
+        assert "interests" not in block.lower()
+        assert "python" not in block
+        assert "security" not in block
+        assert "machine_learning" not in block
+        assert "interaction_count" not in block.lower()
+        assert "99" not in block
+
+    @pytest.mark.parametrize("interests", [
+        [],
+        ["a"],
+        ["a", "b", "c", "d", "e"],
+    ])
+    def test_block_size_constant_under_interests(self, interests):
+        # Block length must not grow with the size of the interests list
+        # — otherwise an attacker / accidental signal in past topics
+        # could expand the prompt and affect attention.
+        p1 = UserProfile(interests=[])
+        p2 = UserProfile(interests=interests)
+        assert len(profile_to_prompt_block(p1)) == len(profile_to_prompt_block(p2))
+
 
 class TestPlannerIgnoresProfile:
+    def test_planner_user_prompt_does_not_reference_profile(self, tmp_path):
+        """A loop run with a stored profile sends none of it to the planner's model call.
+
+        Why: the loop, not the prompt builder, decides what reaches the planner.
+        """
+        from unittest.mock import MagicMock
+
+        from core.logger import TraceLogger
+        from core.loop import AgentLoop
+        from core.policy import PolicyGate
+        from core.user_profile import UserProfileStore
+        from tools.base import ToolRegistry
+
+        store = UserProfileStore(tmp_path / "profile.jsonl")
+        store.save(UserProfile(
+            expertise="expert", verbosity="brief", technical=True,
+            language="en", interests=["zymurgy"], interaction_count=7,
+        ))
+        registry = ToolRegistry()
+        llm = MagicMock()
+        llm.provider = "mock"
+        llm.model = "mock-model"
+        llm.complete.return_value = (
+            "Conclusion:\nOK\n\nFacts:\n- fact [general-knowledge]\n"
+            "Sources:\n1. general-knowledge\nConfidence: low\n"
+            "Unverified:\nnothing\nSafety:\nnothing"
+        )
+        loop = AgentLoop(
+            registry=registry, policy=PolicyGate(registry), llm=llm,
+            logger=TraceLogger(trace_id="test-p2-planner", log_dir=tmp_path),
+            user_profile_store=store,
+            verifier_enabled=False, clarification_enabled=False,
+        )
+        planner_calls: list = []
+        real_plan = loop.planner.plan
+
+        def _spy_plan(*args, **kwargs):
+            start = len(llm.complete.call_args_list)
+            try:
+                return real_plan(*args, **kwargs)
+            finally:
+                planner_calls.extend(llm.complete.call_args_list[start:])
+
+        loop.planner.plan = _spy_plan
+        loop.run("Calculate the orbital period of Mercury.")
+
+        assert loop.last_user_profile is not None
+        assert "zymurgy" in loop.last_user_profile.interests
+        assert planner_calls, "the planner made no model call, so nothing was checked"
+        sent = " || ".join(str(call) for call in planner_calls)
+        for needle in ("user_profile", "zymurgy", "interests:", "expertise:", "verbosity:"):
+            assert needle not in sent, f"planner prompt leaked {needle!r}"
+
     def test_planner_source_does_not_import_user_profile(self):
         # Source-level contract: core/planner.py must not import the
         # user_profile module at all. Importing it would mean the
@@ -27,3 +122,61 @@ class TestPlannerIgnoresProfile:
         src = inspect.getsource(_planner_mod)
         assert "from core.user_profile" not in src
         assert "import core.user_profile" not in src
+
+
+class TestMemoryRetrievalIgnoresProfile:
+    def test_memory_select_uses_question_not_interests(self):
+        # MemoryRetrievalPolicy.select must score by question/tag overlap
+        # alone. Even if the user's "interests" included terms unrelated
+        # to the current question, retrieval ranking must be unaffected.
+        from core.memory_policy import MemoryRetrievalPolicy
+        from core.models import MemoryRecord
+
+        policy = MemoryRetrievalPolicy()
+        records = [
+            MemoryRecord(
+                content="Mercury orbital period 88 days",
+                tags=["astronomy"],
+            ),
+            MemoryRecord(
+                content="Python list comprehension syntax",
+                tags=["python"],
+            ),
+        ]
+        # Question is purely astronomy. Profile interests are irrelevant
+        # because the policy.select signature does not accept profile.
+        selected = policy.select(records, question="What is Mercury's orbital period?")
+        # The astronomy record should rank ahead of the python one,
+        # regardless of any past interest in python.
+        assert selected[0].content.startswith("Mercury")
+
+
+class TestSourceRankerIgnoresProfile:
+    def test_rank_chain_signature_excludes_profile(self):
+        # Negative contract: the source-ranker public API must not
+        # accept a profile/interests argument; if a future refactor
+        # tries to add one, this test fails fast.
+        import inspect
+
+        from core.source_ranker import rank_chain
+
+        sig = inspect.signature(rank_chain)
+        for forbidden in ("profile", "user_profile", "interests"):
+            assert forbidden not in sig.parameters, (
+                f"rank_chain must not accept {forbidden!r} parameter"
+            )
+
+
+class TestSystemAnswerStyleOnlyClause:
+    def test_system_answer_states_profile_is_style_only(self):
+        # The synthesizer-system prompt must explicitly tell the LLM
+        # to use the user_profile block for style only and never for
+        # topic / domain selection. This is the LLM-level guardrail.
+        from core.loop import SYSTEM_ANSWER
+
+        text = SYSTEM_ANSWER.lower()
+        assert "user_profile" in text or "user profile" in text
+        # Either a "style only" phrase or an explicit "must not"
+        # against domain influence is required.
+        assert ("style only" in text) or ("only for presentation" in text)
+        assert ("not influence" in text) or ("must not" in text) or ("never" in text)

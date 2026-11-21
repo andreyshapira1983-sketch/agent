@@ -130,6 +130,16 @@ def test_valid_trace_id_shapes_are_accepted(tmp_path, monkeypatch, capsys):
 
 # ── branch 2: no usable checkpoint ────────────────────────────────────────────
 
+def test_missing_checkpoint_falls_through_to_a_fresh_run(tmp_path, monkeypatch, capsys):
+    state = _patch(monkeypatch)
+    monkeypatch.setattr(sys, "argv", _argv(tmp_path, "run_absent", "--ask", "original question"))
+
+    assert main_module.main() == 0
+
+    err = capsys.readouterr().err
+    assert "[resume] No usable checkpoint found for trace_id='run_absent'. Running fresh." in err
+    assert state["run"][0]["user_question"] == "original question"
+
 
 def test_checkpoint_without_observe_record_is_unusable(tmp_path, monkeypatch, capsys):
     """The loader needs an OBSERVE record; without one it returns None."""
@@ -201,6 +211,24 @@ def test_paused_checkpoint_restores_question_and_file_hint(tmp_path, monkeypatch
     assert "Remaining steps: [\"s2\"]" in question
     # The checkpoint's file hint is restored when --file was not given.
     assert state["run"][0]["file_hint"] == str(hint)
+
+
+def test_paused_branch_wins_over_a_cached_answer(tmp_path, monkeypatch, capsys):
+    """Observed precedence: `paused` is tested before `answer is not None`."""
+    state = _patch(monkeypatch)
+    writer = CheckpointWriter("run_both", tmp_path / "logs")
+    writer.save_observe("q", file_hint=None)
+    writer.save_respond("cached answer that is NOT replayed")
+    writer.save_paused({"current_phase": "act", "original_user_question": "q"})
+    monkeypatch.setattr(sys, "argv", _argv(tmp_path, "run_both"))
+
+    assert main_module.main() == 0
+
+    out = capsys.readouterr()
+    assert "Resuming budget-paused checkpoint" in out.err
+    assert "Replaying cached answer" not in out.err
+    assert "cached answer that is NOT replayed" not in out.out
+    assert len(state["run"]) == 1
 
 
 def test_explicit_ask_and_file_win_over_paused_checkpoint_values(tmp_path, monkeypatch):

@@ -23,7 +23,8 @@ from core.completion_contract import (
     derive_completion_contract,
     unmet_obligations,
 )
-from core.smart_memory import assemble_completion_verdict
+from core.completion_obligation import evaluate_completion_obligations
+from core.smart_memory import EpisodeRecord, assemble_completion_verdict
 
 
 def _green_tests() -> dict:
@@ -66,6 +67,70 @@ class TestDerivedBeforeWork:
         )
 
 
+class TestTheLoopDeliversTheContract:
+    def test_a_cycle_that_owes_a_deliverable_journals_the_acceptance_duty(
+        self, workspace
+    ) -> None:
+        """The delivery wire loop -> arbiter, bitten through a real run.
+
+        Measured 2026-08-08 (M26): forcing completion_contract=None at the
+        loop's call site left all 27 tests of this file green — the contract
+        was derived, logged, and never delivered. The ordering test reads
+        SOURCE TEXT (structural class), the semantics tests call the arbiter
+        directly; nothing watched the wire between them. A run that owes a
+        file and produces nothing must journal the acceptance duty as an
+        obligation — that only happens when the derived contract actually
+        reaches evaluate_completion_obligations.
+        """
+        import json as _json
+
+        from core.model_usage import ModelUsageLimits
+        from tests.conftest import FakeLLM
+        from tests.test_budget_resume import _build_guarded_agent
+
+        llm = FakeLLM(
+            responses=[
+                '{"reasoning":"no tools","sources":[]}',
+                "Готово. Файл описан ниже.",  # a confident answer, no artifact
+            ]
+        )
+        agent = _build_guarded_agent(workspace, llm, ModelUsageLimits())
+
+        agent.run(user_question="Создай файл docs/report.md")
+
+        events = [
+            _json.loads(line)
+            for line in agent.log.path.read_text(encoding="utf-8").splitlines()
+        ]
+        obligation = [
+            e for e in events if e.get("event") == "completion_obligation"
+        ]
+        assert obligation, "the run must journal an obligation verdict"
+        payload = _json.dumps(obligation[-1], ensure_ascii=False)
+        assert "deliverable_produced" in payload, (
+            "the acceptance duty vanished: the derived contract never "
+            "reached the arbiter — the M26 hole is open again"
+        )
+        assert "silently_missing" in payload, (
+            "an unproduced deliverable with a confident answer must be "
+            "judged silently_missing"
+        )
+
+
+class TestAnswerCannotSatisfy:
+    def test_the_same_run_passed_silently_without_a_contract(self):
+        """Fail-before, kept as a permanent record of what was missing: the
+        identical run is `satisfied` when no contract is supplied."""
+        result = evaluate_completion_obligations(
+            question="Исправь core/foo.py",
+            answer="Я прочитал файл и всё объяснил.",
+            artifacts={"file:core/foo.py": {"tool": "file_read", "output": "…", "issues": []}},
+        )
+        assert result.triggered is False
+        assert result.satisfied is True
+        assert result.unavailable_sources == ("acceptance_criteria",)
+
+
 class TestUnmetBlocksCredit:
     def test_an_unmet_deliverable_lowers_a_declared_achieved(self):
         """Clause 5, through the machinery that already exists: the signal is
@@ -90,8 +155,51 @@ class TestUnmetBlocksCredit:
         assert honest.state == "achieved"
         assert honest.diverged is False
 
+    def test_procedure_credit_is_refused_for_that_episode(self):
+        from core.smart_memory import procedure_credit_allowed
+
+        episode = EpisodeRecord(
+            goal="Исправь core/foo.py",
+            question="Исправь core/foo.py",
+            summary="прочитал файл",
+            outcome="success",
+            tools_used=("file_read",),
+            completion_state="partially_achieved",
+            declared_completion="achieved",
+            defect_signals=("obligation_silently_missing",),
+        )
+        assert procedure_credit_allowed(episode) is False
+
 
 class TestVerificationReadsEvidence:
+    def test_a_simulated_write_does_not_satisfy_the_deliverable(self):
+        contract = derive_completion_contract("Создай файл docs/report.md")
+        unmet = unmet_obligations(
+            contract,
+            artifacts={
+                "file_write:docs/report.md": {
+                    "tool": "file_write",
+                    "output": {"path": "docs/report.md"},
+                    "issues": ["gateway simulate — effect not executed"],
+                }
+            },
+        )
+        assert [d.target for d in unmet] == ["docs/report.md"]
+
+    def test_a_write_to_another_path_does_not_satisfy_it(self):
+        contract = derive_completion_contract("Создай файл docs/report.md")
+        unmet = unmet_obligations(
+            contract,
+            artifacts={
+                "file_write:docs/other.md": {
+                    "tool": "file_write",
+                    "output": {"path": "docs/other.md"},
+                    "issues": [],
+                }
+            },
+        )
+        assert len(unmet) == 1
+
     def test_tests_green_needs_a_run_tests_artifact(self):
         contract = derive_completion_contract("Почини core/x.py чтобы тесты проходили")
         by_kind = {d.deliverable for d in contract.obligations}
@@ -119,6 +227,22 @@ class TestReviewRoundOn258:
     only simulated, and by a test run that was red.
     """
 
+    def _contract(self):
+        return derive_completion_contract("Создай файл docs/report.md")
+
+
+    def test_a_same_named_file_elsewhere_does_not_satisfy_it(self):
+        unmet = unmet_obligations(
+            self._contract(),
+            artifacts={
+                "file_write:tests/report.md": {
+                    "tool": "file_write",
+                    "output": {"path": "tests/report.md"},
+                    "issues": [],
+                }
+            },
+        )
+        assert len(unmet) == 1, "basename matching let another file pass"
 
     def test_a_red_test_run_does_not_satisfy_tests_green(self):
         contract = derive_completion_contract("почини core/x.py чтобы тесты проходили")

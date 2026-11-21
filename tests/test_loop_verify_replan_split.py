@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ast
 import subprocess  # nosec B404 — читаем историю через git show, вход фиксирован
+from dataclasses import fields as dataclass_fields
 from pathlib import Path
 
 import core.loop as loop_mod
@@ -160,6 +161,16 @@ def test_the_prefix_is_the_earlier_piece_and_nothing_else():
     )
     assert "self._verify_draft(" in ast.unparse(prefix[-2]), (
         "начало блока больше не вызывает вынесенную куском 5 проверку"
+    )
+
+
+def test_the_substitution_matches_the_state():
+    """Список подстановки и поля датакласса — одно и то же, в обе стороны."""
+    declared = {f.name for f in dataclass_fields(VerifyState)}
+    assert declared == set(SUBSTITUTED), (
+        "поля состояния разошлись со списком подстановки: "
+        f"только в датаклассе {sorted(declared - set(SUBSTITUTED))}, "
+        f"только в списке {sorted(set(SUBSTITUTED) - declared)}"
     )
 
 

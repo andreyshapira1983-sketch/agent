@@ -22,6 +22,7 @@ from core.approval_inbox import ApprovalInbox
 from core.backlog_target_mapper import map_backlog_candidate
 from core.self_build_producer import (
     _critic_review,
+    _new_core_module_stems,
     _sync_anatomy_index,
     produce_self_apply_proposal,
 )
@@ -212,6 +213,17 @@ def test_split_critical_target_is_refused(workspace: Path):
 
 
 # ── anatomy-index auto-sync ──────────────────────────────────────────────────
+
+
+def test_new_core_module_stems_lists_only_core_py_files():
+    files = [
+        {"path": "core/x.py", "content": ""},
+        {"path": "core/x_helpers.py", "content": ""},
+        {"path": "knowledge/generated/AGENT_ANATOMY.md", "content": ""},
+        {"path": "cli/thing.py", "content": ""},
+        {"path": "core/sub/pkg.py", "content": ""},
+    ]
+    assert _new_core_module_stems(files) == ["x", "x_helpers"]
 
 
 def test_sync_anatomy_index_appends_row_for_new_module():

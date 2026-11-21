@@ -124,3 +124,19 @@ def test_a_readiness_blocker_prevents_the_write(workspace: Path) -> None:
         "the blocked step must reach the replan machinery — a refusal that leaves "
         "no trigger is a silent failure"
     )
+
+
+def test_the_gate_is_check_readiness_and_not_the_blockers_alone(
+    workspace: Path,
+) -> None:
+    """CONTROL: same blockers, gate off. Establishes what is actually deciding."""
+    target, events = _run(workspace, blockers=_BLOCKERS, check_readiness=False)
+    assert target.exists(), "with the gate off the write must go through"
+    assert _outcomes(events) == ["allow"]
+
+
+def test_an_unblocked_run_writes_the_file(workspace: Path) -> None:
+    """CONTROL: nothing engaged. Without this, 'not written' proves nothing."""
+    target, events = _run(workspace, blockers=(), check_readiness=False)
+    assert target.exists()
+    assert _outcomes(events) == ["allow"]

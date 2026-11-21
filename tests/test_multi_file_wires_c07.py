@@ -69,3 +69,34 @@ def test_a_refused_review_ends_the_turn_before_any_planning(tmp_path: Path) -> N
     refused = [e for e in _events(log_path) if e["event"] == "multi_file_review_refused"]
     assert refused, "the refusal must be journaled"
     assert answer.strip(), "the operator receives the kernel's message, not silence"
+
+
+def test_a_forced_review_reads_the_kernels_plan_not_the_llms(tmp_path: Path) -> None:
+    """Forced wire: the kernel's validated read-plan executes verbatim.
+
+    The LLM planner's answer names NO tools; if the forced plan is delivered,
+    both files are read anyway and the planner is never even consulted on
+    attempt 1. Under M46 this red: no file_read ran at all.
+    """
+    (tmp_path / "a.md").write_text("alpha\n", encoding="utf-8")
+    (tmp_path / "b.md").write_text("beta\n", encoding="utf-8")
+    llm = FakeLLM(
+        responses=[
+            '{"reasoning":"no tools","sources":[]}',   # would-be planner call
+            ("Conclusion: compared. [file:a.md]\nFacts:\n- x [file:a.md]\n"
+            "Sources:\n1. file:a.md\nConfidence: high\n"),
+        ]
+    )
+    agent, log_path = _agent(tmp_path, llm)
+
+    agent.run("multi-file review: сравни a.md и b.md")
+
+    acts = [
+        e for e in _events(log_path)
+        if e["event"] == "tool_call" and e["payload"].get("tool_name") == "file_read"
+    ]
+    read_paths = sorted(e["payload"]["arguments"]["path"] for e in acts)
+    assert read_paths == ["a.md", "b.md"], (
+        f"the kernel's forced plan must read exactly its validated paths, "
+        f"got {read_paths} — the LLM plan was used instead (M46 hole)"
+    )

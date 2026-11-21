@@ -71,6 +71,17 @@ def _idle_untagged(access_count: int) -> MemoryRecord:
     )
 
 
+def test_a_never_retrieved_record_is_archived(tmp_path: Path) -> None:
+    store = PersistentMemoryStore(tmp_path / "m.jsonl")
+    rec = _idle_untagged(access_count=0)
+    store.save(rec)
+
+    assert _archived_ids(store) == [rec.id], (
+        "precondition of the whole arc: with no accesses this record IS "
+        "archivable, so the next test's difference can only be the count"
+    )
+
+
 def test_the_access_count_written_by_retrieval_saves_the_same_record(
     tmp_path: Path,
 ) -> None:

@@ -393,6 +393,32 @@ class TestPolicyVerdictTravelsBack:
     citation, only `max_total_replans` differs.
     """
 
+    def test_continue_verdict_comes_back_and_the_run_replans(
+        self, workspace: Path
+    ):
+        url = "https://example.com/pole-continue"
+        planner = ScriptedPlanner(scripts=[
+            [{"tool": "web_search", "arguments": {"query": "q"},
+              "label": "search:q"}],
+            [{"tool": "web_fetch", "arguments": {"url": url},
+              "label": "web:page"}],
+        ])
+        agent, log_path, _ = _build_agent(
+            workspace,
+            planner=planner,
+            llm_responses=[f"Conclusion: claim [web:{url}]. Sources: {url}"],
+            url_routes={url: b"<html>body</html>"},
+            max_replan_attempts=3,
+        )
+        agent.run("q")
+
+        events = _events(log_path)
+        assert [e for e in events
+                if e["event"] == "replan"
+                and e["payload"].get("phase") == "verify"]
+        assert not [e for e in events if e["event"] == "replan_exhausted"]
+        assert agent.last_replan_exhausted is False
+        assert len(planner.calls) == 2
 
     def test_abort_verdict_comes_back_and_stops_the_replan(
         self, workspace: Path

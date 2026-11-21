@@ -284,3 +284,64 @@ def test_stream_complete_falls_back_to_billed_complete_without_provider_streamin
 
     assert out == "plain answer"
     assert [r.role for r in ledger.records] == ["synthesizer"]
+
+
+# ---------------------------------------------------------------------------
+# Spend has to be attributable to a single run.
+#
+# The ledger file is append-only and outlives the process, so every run writes
+# into the same history. Without a run identifier the records of a run can only
+# be separated by eyeballing timestamps, which stops working the moment two
+# runs overlap or a sub-agent runs inside a parent. The agent already mints a
+# per-run identifier — the trace id — so this reuses it rather than inventing a
+# second name for the same thing.
+# ---------------------------------------------------------------------------
+
+
+class _TraceStub:
+    """Stand-in for TraceLogger: the ledger only ever reads `trace_id`."""
+
+    def __init__(self, trace_id: str):
+        self.trace_id = trace_id
+        self.events: list[tuple[str, dict]] = []
+
+    def log(self, event: str, payload: dict) -> None:
+        self.events.append((event, payload))
+
+
+def _record_one(ledger: ModelUsageLedger, *, role: str = "planner"):
+    return ledger.record(
+        role=role,
+        provider="fake",
+        model="fake-1",
+        route_reason="default",
+        cost_tier="low",
+        status="success",
+        input_tokens=3,
+        output_tokens=2,
+        estimated=False,
+        started_at="2026-01-01T00:00:00+00:00",
+        completed_at="2026-01-01T00:00:01+00:00",
+        duration_ms=1000,
+    )
+
+
+def test_outside_any_run_the_session_id_is_still_recorded():
+    """No run scope (a REPL command, a probe) → the session id is the best id."""
+    ledger = ModelUsageLedger(logger=_TraceStub("session-1"))
+
+    _record_one(ledger)
+
+    assert ledger.records[-1].run_id == "session-1"
+
+
+def test_an_explicit_ledger_run_id_is_not_overridden_by_a_run_scope():
+    """A sub-agent ledger built for one run stays pinned to it."""
+    from core.run_context import run_scope
+
+    ledger = ModelUsageLedger(logger=_TraceStub("session-1"), run_id="explicit")
+
+    with run_scope("run-A"):
+        _record_one(ledger)
+
+    assert ledger.records[-1].run_id == "explicit"

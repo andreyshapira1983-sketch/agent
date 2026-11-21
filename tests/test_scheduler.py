@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from core.scheduler import SchedulerStore
+from core.task_queue import TaskQueueStore
 
 
 def test_due_returns_only_active_due_schedules(workspace: Path):
@@ -34,6 +35,33 @@ def test_due_returns_only_active_due_schedules(workspace: Path):
     due_now = store.due(now=now)
 
     assert [schedule.id for schedule in due_now] == [due.id]
+
+
+def test_tick_enqueues_due_tasks_and_advances_schedule(workspace: Path):
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    schedules = SchedulerStore(workspace / "schedules.jsonl")
+    queue = TaskQueueStore(workspace / "tasks.jsonl")
+    schedule = schedules.add(
+        name="health",
+        goal="project health",
+        every_minutes=30,
+        start_at=now - timedelta(minutes=5),
+        include_tests=False,
+        limit=2,
+    )
+
+    report = schedules.tick(task_queue=queue, now=now)
+
+    assert report.due_count == 1
+    assert report.enqueued_count == 1
+    task = queue.load()[0]
+    assert task.goal == "project health"
+    assert not task.include_tests
+    assert task.limit == 2
+    updated = schedules.load()[0]
+    assert updated.id == schedule.id
+    assert updated.last_run_at is not None
+    assert updated.next_run_at > updated.last_run_at
 
 
 def test_scheduler_skips_invalid_records_and_parses_string_booleans(workspace: Path):

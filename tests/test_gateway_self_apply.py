@@ -9,13 +9,25 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.actuation_gateway import ActuationGateway
+from core.actuation_gateway import ActuationGateway, GatewayDecision
 from core.approval_inbox import ApprovalInbox
 from core.self_apply_bridge import (
     SELF_APPLY_OPERATION,
     build_self_apply_payload,
     run_approved_self_apply,
 )
+
+
+class _FakeGateway:
+    """Returns a fixed outcome and records that it was consulted."""
+
+    def __init__(self, outcome: str):
+        self.outcome = outcome
+        self.calls = 0
+
+    def evaluate_self_apply(self, *, operation: str = SELF_APPLY_OPERATION) -> GatewayDecision:
+        self.calls += 1
+        return GatewayDecision(outcome=self.outcome, tool_name=operation, path="self_apply")
 
 
 class _BoomGateway:
@@ -59,6 +71,21 @@ def test_default_gateway_dry_run_uses_real_actuation_gateway() -> None:
 
     result = _run(inbox, item_id, _raising_lane, dry_run=True)
     assert result["status"] == "simulated"
+
+
+def test_deny_block_escalate_do_not_mutate() -> None:
+    for outcome in ("deny", "block", "escalate"):
+        inbox = ApprovalInbox()
+        item_id = _approved(inbox)
+
+        # B023: значение цикла привязано на месте определения — иначе поздний
+        # вызов подписал бы отказ чужим исходом.
+        def _raising_lane(proposal, *, _outcome=outcome, **kwargs):
+            raise AssertionError(f"lane must not run on gateway {_outcome}")
+
+        result = _run(inbox, item_id, _raising_lane, gateway=_FakeGateway(outcome))
+        assert result["status"] == "gateway_blocked"
+        assert inbox.get(item_id).status == "approved"
 
 
 def test_gateway_exception_fails_closed() -> None:

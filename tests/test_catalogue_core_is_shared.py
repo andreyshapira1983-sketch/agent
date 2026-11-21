@@ -36,6 +36,65 @@ import pathlib
 
 from core.loop_evidence_chain import AgentLoopEvidenceChain
 
+
+class _Pipeline:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+        self.chains: list = []
+
+    def run(self, chain, **kw):
+        self.calls.append(kw)
+        self.chains.append(chain)
+
+        class _Result:
+            registry = "REGISTRY"
+
+            def to_log_payload(self):
+                return {}
+        return _Result()
+
+
+class _Agent(AgentLoopEvidenceChain):
+    def __init__(self, *, gateway_path: str = "repl") -> None:
+        self.knowledge_pipeline = _Pipeline()
+        self.knowledge_auto_write = True
+        self.source_registry_store = "STORE"
+        self.gateway_path = gateway_path
+
+    def _knowledge_remember_batch(self):
+        return "REMEMBER"
+
+    def _unattended_run(self) -> bool:
+        return self.gateway_path != "repl"
+
+
+class _Chain:
+    """Only what `rank_chain` touches."""
+
+    evidences: tuple = ()
+
+    def __len__(self) -> int:
+        return 0
+
+
+# ---------------------------------------------------------------------------
+# The core computes, and nothing else
+# ---------------------------------------------------------------------------
+
+
+def test_permissions_reach_the_pipeline():
+    agent = _Agent()
+
+    agent._catalogue_chain(
+        _Chain(), question="q", may_knowledge=False, may_source_registry=False,
+    )
+
+    sent = agent.knowledge_pipeline.calls[0]
+    assert sent["remember"] is None
+    assert sent["auto_write_memory"] is False
+    assert sent["source_store"] is None
+
+
 # ---------------------------------------------------------------------------
 # The duplication is gone and must not return
 # ---------------------------------------------------------------------------

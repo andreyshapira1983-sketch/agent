@@ -122,6 +122,21 @@ def test_the_loop_no_longer_defines_them():
             )
 
 
+def test_import_seams_survive():
+    """Имена, которые импортируют тесты и соседи, доступны по прежнему пути."""
+    from core.loop import (
+        _TOOL_SOURCE_HINTS,
+        _TRUSTED_INTERNAL_TOOLS,
+        _step_trigger_tls,
+    )
+
+    assert _step_trigger_tls is not None  # шов: имя доступно по прежнему пути
+    assert isinstance(_TRUSTED_INTERNAL_TOOLS, frozenset)
+    assert _TOOL_SOURCE_HINTS["web_fetch"] == "web"
+    # И то же самое — из нового дома.
+    assert step_mod._TRUSTED_INTERNAL_TOOLS is _TRUSTED_INTERNAL_TOOLS
+
+
 def test_the_split_actually_shrank_the_loop():
     """Смысл раскола — размер. Цикл обязан быть заметно меньше прежнего."""
     lines = len(Path(loop_mod.__file__).read_text(encoding="utf-8").splitlines())

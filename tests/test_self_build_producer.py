@@ -443,6 +443,38 @@ def _write_self_build_docs_pilot_signal(
         )
 
 
+def _write_anatomy_candidate(workspace: Path) -> None:
+    (workspace / "docs").mkdir(parents=True, exist_ok=True)
+    (workspace / "knowledge" / "generated").mkdir(parents=True, exist_ok=True)
+    (workspace / "knowledge" / "generated" / "AGENT_ANATOMY.md").write_text(
+        "## Candidate follow-ups (TD-030+) -- advisory only\n\n"
+        "1. **TD-030 (candidate): Unify the role mechanisms.** Later.\n",
+        encoding="utf-8",
+    )
+
+
+def test_default_uses_grounded_selector_not_llm(workspace: Path):
+    # TD-036 follow-up: with neither a grounded_selector nor the legacy flag, the
+    # producer builds the default workspace-backed grounded selector. The tmp
+    # workspace has no TECH_DEBT.md / anatomy backlog, so the closed set is empty
+    # and the Manager refuses WITHOUT ever consulting the LLM.
+    inbox = ApprovalInbox(path=None)
+    llm = FakeLLM([_manager_ok(), _builder_ok()])  # must never be consulted
+    report = produce_self_apply_proposal(
+        workspace=workspace,
+        inbox=inbox,
+        llm=llm,
+        vcs=FakeVCS(clean=True),
+        budget_snapshot=_headroom_budget(),
+        kill_switch=FakeKillSwitch(active=False),
+    )
+    assert report.status == "no_grounded_target"
+    assert [r.role for r in report.role_outputs] == ["manager"]
+    assert report.role_outputs[0].decision == "no_target"
+    assert llm.calls == []  # no LLM invention, no builder work
+    assert inbox.list() == []
+
+
 def test_default_grounded_selector_is_read_only(workspace: Path, monkeypatch):
     # The default selector reads TECH_DEBT.md / anatomy / value-reviews strictly
     # read-only; a broken backlog loader must degrade to "no candidate", never
@@ -614,6 +646,31 @@ def test_default_grounded_selector_does_not_repeat_docs_pilot_after_doc_exists(
     assert report.status == "no_grounded_target"
     assert report.role_outputs[0].decision == "no_target"
     assert report.reason == "no grounded backlog candidate"
+    assert llm.calls == []
+    assert inbox.list() == []
+
+
+def test_default_grounded_selector_keeps_anatomy_candidates_blocked(
+    workspace: Path,
+):
+    _write_anatomy_candidate(workspace)
+    inbox = ApprovalInbox(path=None)
+    llm = FakeLLM([_builder_custom("VALUE = 2\n", "must not run")])
+
+    report = produce_self_apply_proposal(
+        workspace=workspace,
+        inbox=inbox,
+        llm=llm,
+        vcs=FakeVCS(clean=True),
+        budget_snapshot=_headroom_budget(),
+        kill_switch=FakeKillSwitch(active=False),
+    )
+
+    assert report.status == "no_grounded_target"
+    manager = report.role_outputs[0]
+    assert manager.decision == "no_target"
+    assert manager.data["mapping_decision"] == "no_target"
+    assert manager.data["rejected_target"].startswith("anatomy:")
     assert llm.calls == []
     assert inbox.list() == []
 
@@ -820,6 +877,27 @@ def test_builder_retry_exhausted_still_vetoes(workspace: Path):
     assert inbox.list() == []
 
 
+def test_default_single_attempt_does_not_retry(workspace: Path):
+    # B: default max_builder_attempts=1 keeps the historical single-shot behaviour
+    # even though a valid 2nd response is queued.
+    inbox = ApprovalInbox(path=None)
+    cand = _Candidate(_TARGET, "grounded: tidy", "TECH_DEBT.md:1")
+    llm = FakeLLM([_builder_ok(content=_DIFF_CONTENT), _builder_ok(content="VALUE = 9\n")])
+    report = produce_self_apply_proposal(
+        **_grounded_full_kwargs(
+            workspace,
+            inbox=inbox,
+            llm=llm,
+            grounded_selector=lambda: cand,
+        )
+    )
+    assert report.status == "critic_veto"
+    assert report.attempts == 1
+    builder_calls = [c for c in llm.calls if "Builder" in c["system"]]
+    assert len(builder_calls) == 1
+    assert inbox.list() == []
+
+
 def _fake_split_plan(target, *, status="planned", reason="mixin extraction of 1 name", step=True):
     step_obj = None
     if step:
@@ -893,6 +971,38 @@ def _proven_split(monkeypatch):
     import core.split_proof as sp
     monkeypatch.setattr(sp, "proof_for", lambda rel, index: SimpleNamespace(
         kind="multi_subject", names=(), loc=200))
+
+
+def test_oversized_split_scale_gate_routes_to_deterministic(workspace, monkeypatch):
+    _proven_split(monkeypatch)
+    # Site 2: a split the mapper accepts but that exceeds the single-shot Builder
+    # budget is also routed to the deterministic splitter rather than refused.
+    import core.incremental_splitter as isp
+    import core.self_build_producer as mod
+
+    (workspace / "core").mkdir(parents=True, exist_ok=True)
+    target_rel = "core/huge_mod.py"
+    (workspace / target_rel).write_text("A = 1\nB = 2\nC = 3\nD = 4\n", encoding="utf-8")
+    # Mapper accepts (default 1500), but the scale gate fires (tiny threshold).
+    monkeypatch.setattr(mod, "_MAX_SPLIT_TARGET_LINES", 2)
+    monkeypatch.setattr(isp, "plan_incremental_split", lambda ws, tgt, **k: _fake_split_plan(tgt))
+
+    inbox = ApprovalInbox(path=None)
+    llm = FakeLLM(["{}"])
+    report = produce_self_apply_proposal(
+        workspace=workspace,
+        inbox=inbox,
+        llm=llm,
+        vcs=FakeVCS(clean=True),
+        budget_snapshot=_headroom_budget(),
+        kill_switch=FakeKillSwitch(active=False),
+        file_reader=lambda p: (workspace / p).read_text() if (workspace / p).exists() else None,
+        grounded_selector=lambda: _oversized_split_cand(target_rel),
+    )
+    assert report.status == "proposed", report.reason
+    assert report.approval_id
+    assert not any("Builder" in c["system"] for c in llm.calls)
+    assert len(inbox.list()) == 1
 
 
 def test_oversized_split_no_patch_when_planner_cannot(workspace, monkeypatch):
@@ -1020,6 +1130,50 @@ def test_oversized_split_real_planner_end_to_end(workspace, monkeypatch):
     paths = {f["path"] for f in items[0].payload["files"]}
     assert target_rel in paths
     assert any(p.endswith("_helpers.py") for p in paths)
+
+
+def test_small_split_still_proceeds_past_scale_filter(workspace: Path):
+    # C guard must NOT fire on a normal-sized split: this one publishes.
+    (workspace / "core").mkdir(parents=True, exist_ok=True)
+    target_rel = "core/sample_small.py"
+    current = "def a():\n    return 1\n\n\ndef b():\n    return 2\n"
+    (workspace / target_rel).write_text(current, encoding="utf-8")
+    inbox = ApprovalInbox(path=None)
+    reply = json.dumps(
+        {
+            "files": [
+                {"path": target_rel, "content": "from core.sample_small_helpers import a, b\n"},
+                {
+                    "path": "core/sample_small_helpers.py",
+                    "content": "def a():\n    return 1\n\n\ndef b():\n    return 2\n",
+                },
+            ],
+            "test_paths": ["tests"],
+            "reason": "split oversized module into helpers",
+            "confidence": 0.9,
+        }
+    )
+    llm = FakeLLM([reply])
+    report = produce_self_apply_proposal(
+        workspace=workspace,
+        inbox=inbox,
+        llm=llm,
+        vcs=FakeVCS(clean=True),
+        budget_snapshot=_headroom_budget(),
+        kill_switch=FakeKillSwitch(active=False),
+        file_reader=lambda p: current if p == target_rel else None,
+        grounded_selector=lambda: types.SimpleNamespace(
+            target_path=f"split:{target_rel}",
+            signal_source="oversized_module",
+            evidence_ref=f"oversized_module:{target_rel}",
+            problem_quote="module is oversized",
+            proposed_change="split",
+            proof_of_value="",
+            expected_effect="",
+            confidence=0.4,
+        ),
+    )
+    assert report.status == "proposed", report.reason
 
 
 def test_cooldown_selector_skips_recently_vetoed_target(workspace: Path, monkeypatch):

@@ -139,3 +139,11 @@ def test_the_admitted_count_reports_what_actually_landed(monkeypatch) -> None:
     admitted = [p for name, p in shim.log.events
                 if name == "dialogue_evidence_admitted"]
     assert admitted and admitted[0]["turns"] == 1
+
+
+def test_all_three_items_land_when_nothing_fails() -> None:
+    """GUARD: the assertions above must not be satisfied by an empty fold."""
+    chain, _shim = _fold(
+        _Memory({"b": _GOOD_ARTIFACT}, [_Turn("t1", 1), _Turn("t2", 2)])
+    )
+    assert len(chain) == 3

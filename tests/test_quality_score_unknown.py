@@ -75,3 +75,54 @@ def test_reask_hint_is_not_less_likely_for_a_groundless_answer(tmp_path) -> None
         "a re-ask after a groundless answer was LESS likely to be noticed than "
         "one after a weakly-evidenced answer"
     )
+
+
+# ==========================================================================
+# Consumer 4 — the fast path must not replay an unmeasured answer
+# ==========================================================================
+def test_unmeasured_episode_is_not_fast_path_eligible() -> None:
+    """The gate compares against 0.70; None must fail it, not crash on it."""
+    from core.loop import AgentLoop
+
+    groundless = _ep("groundless", 0, 0)
+    assert groundless.answer_quality_score is None
+    assert not AgentLoop._quality_allows_replay(groundless), (
+        "an answer whose quality was never established must not be replayed"
+    )
+
+
+def test_measured_high_quality_episode_stays_fast_path_eligible() -> None:
+    """GUARD: the legitimate optimisation must survive."""
+    from core.loop import AgentLoop
+
+    assert AgentLoop._quality_allows_replay(_ep("good", 9, 1))
+
+
+def test_the_gate_itself_refuses_an_unmeasured_answer() -> None:
+    """The docstring's contract is about the GATE, not one term inside it.
+
+    The two tests above ask `_quality_allows_replay` directly, so deleting its
+    call from `_fast_path_allows_replay` left all 7139 tests green (measured
+    2026-08-07). An episode is built that clears every OTHER condition, so the
+    quality term is the only thing left to refuse it — and the measured twin
+    is asserted to pass, which is what proves the refusal is not coming from
+    somewhere else.
+    """
+    from dataclasses import replace
+
+    from core.loop import AgentLoop
+
+    def _replayable(episode):
+        return replace(episode, full_answer="stored answer", completion_state="achieved")
+
+    measured = _replayable(_ep("measured", 9, 1))
+    groundless = _replayable(_ep("groundless", 0, 0))
+
+    assert AgentLoop._fast_path_allows_replay(measured, 1.0), (
+        "control: this episode must clear the gate, or the assertion below "
+        "proves nothing about the quality term"
+    )
+    assert groundless.answer_quality_score is None
+    assert not AgentLoop._fast_path_allows_replay(groundless, 1.0), (
+        "an answer whose quality was never established must not be replayed"
+    )

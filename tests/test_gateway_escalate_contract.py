@@ -25,6 +25,7 @@ from tests.conftest import FakeLLM, FakePlanner
 from tools.base import ToolRegistry
 from tools.file_read import FileReadTool
 from tools.file_write import FileWriteTool
+from tools.shell_exec import ShellExecTool
 
 
 def _seed_budget_config(workspace: Path) -> None:
@@ -62,6 +63,34 @@ def _gateway_receipts(workspace: Path, *, operation: str = "gateway.escalate") -
     ]
 
 
+def _build_repl_agent(
+    workspace: Path,
+    *,
+    planned_step: dict[str, Any],
+    approval_default: str,
+) -> tuple[AgentLoop, Path]:
+    registry = ToolRegistry()
+    registry.register(FileReadTool(workspace_root=workspace))
+    registry.register(FileWriteTool(workspace_root=workspace))
+    registry.register(ShellExecTool(workspace_root=workspace))
+    planner = FakePlanner(sources=[planned_step])
+    trace_id = new_trace_id()
+    log_path = workspace / "logs" / f"{trace_id}.jsonl"
+    agent = AgentLoop(
+        registry=registry,
+        policy=PolicyGate(registry),
+        llm=FakeLLM(responses=["done"]),
+        logger=TraceLogger(trace_id=trace_id, log_dir=workspace / "logs", verbose=False),
+        planner=planner,
+        approval_provider=AutoApprover(default=approval_default),  # type: ignore[arg-type]
+        max_replan_attempts=1,
+        clarification_enabled=False,
+        gateway_dry_run=False,
+        gateway_path="repl",
+    )
+    return agent, log_path
+
+
 def _overwrite_step(path: str = "doc.txt", content: str = "updated\n") -> dict[str, Any]:
     return {
         "tool": "file_write",
@@ -69,6 +98,87 @@ def _overwrite_step(path: str = "doc.txt", content: str = "updated\n") -> dict[s
         "label": f"file_write:{path}",
         "expected_outcome": "overwrite file",
     }
+
+
+def _shell_touch_step() -> dict[str, Any]:
+    return {
+        "tool": "shell_exec",
+        "arguments": {"argv": ["touch", "touched.txt"]},
+        "label": "shell_exec:touch",
+        "expected_outcome": "create touched.txt",
+    }
+
+
+def test_repl_file_write_overwrite_escalate_deny_no_invoke(workspace: Path) -> None:
+    target = workspace / "doc.txt"
+    target.write_text("original\n", encoding="utf-8")
+
+    agent, log_path = _build_repl_agent(
+        workspace,
+        planned_step=_overwrite_step(),
+        approval_default="deny",
+    )
+    agent.run("overwrite doc.txt")
+
+    assert target.read_text(encoding="utf-8") == "original\n"
+    events = _events(log_path)
+    names = [e["event"] for e in events]
+    assert "gateway_decision" in names
+    assert names.index("gateway_decision") < names.index("approval_request")
+    assert "tool_call" not in names
+    assert "tool_result" not in names
+
+    gw = next(e for e in events if e["event"] == "gateway_decision")
+    assert gw["payload"]["outcome"] == "escalate"
+    assert gw["payload"]["tool_name"] == "file_write"
+
+    escalate_rows = _gateway_receipts(workspace)
+    assert len(escalate_rows) == 1
+    assert escalate_rows[0].path == "repl"
+    assert escalate_rows[0].refs.get("tool_name") == "file_write"
+
+
+def test_repl_file_write_overwrite_escalate_approve_invokes_after_approval(
+    workspace: Path,
+) -> None:
+    target = workspace / "doc.txt"
+    target.write_text("original\n", encoding="utf-8")
+
+    agent, log_path = _build_repl_agent(
+        workspace,
+        planned_step=_overwrite_step(),
+        approval_default="approve",
+    )
+    agent.run("overwrite doc.txt")
+
+    assert target.read_text(encoding="utf-8") == "updated\n"
+    events = _events(log_path)
+    names = [e["event"] for e in events]
+    idx = {
+        n: names.index(n)
+        for n in ("gateway_decision", "approval_request", "approval_decision", "tool_call")
+    }
+    assert idx["gateway_decision"] < idx["approval_request"] < idx["approval_decision"] < idx["tool_call"]
+    assert _gateway_receipts(workspace)
+
+
+def test_repl_shell_exec_escalate_deny_no_invoke(workspace: Path) -> None:
+    agent, log_path = _build_repl_agent(
+        workspace,
+        planned_step=_shell_touch_step(),
+        approval_default="deny",
+    )
+    agent.run("touch a file")
+
+    assert not (workspace / "touched.txt").exists()
+    events = _events(log_path)
+    names = [e["event"] for e in events]
+    assert "gateway_decision" in names
+    gw = next(e for e in events if e["event"] == "gateway_decision")
+    assert gw["payload"]["outcome"] == "escalate"
+    assert gw["payload"]["tool_name"] == "shell_exec"
+    assert "tool_call" not in names
+    assert _gateway_receipts(workspace)
 
 
 def _runtime_agent_for_overwrite(

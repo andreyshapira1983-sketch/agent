@@ -29,6 +29,22 @@ class TestScanResultMetadata:
 # _TRUSTED_INTERNAL_TOOLS — exemption from injection scanning in the loop
 # ---------------------------------------------------------------------------
 
+class TestTrustedInternalTools:
+    """Verify the exemption set is defined and contains the right members."""
+
+    def test_internal_file_tools_in_set(self):
+        from core.loop import _TRUSTED_INTERNAL_TOOLS
+        for tool in ("file_read", "list_dir", "diff_file", "run_tests", "read_logs"):
+            assert tool in _TRUSTED_INTERNAL_TOOLS, f"{tool!r} should be trusted"
+
+    def test_external_tools_not_in_set(self):
+        from core.loop import _TRUSTED_INTERNAL_TOOLS
+        for tool in ("web_search", "web_fetch", "rss_fetch",
+                     "semantic_scholar_search", "shell_exec"):
+            assert tool not in _TRUSTED_INTERNAL_TOOLS, (
+                f"{tool!r} must NOT be trusted — its content is external"
+            )
+
 
 class TestPrepareUntrustedTextForLlm:
     def test_clean_passthrough(self):

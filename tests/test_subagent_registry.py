@@ -155,6 +155,23 @@ def test_producer_hook_records_role_outcomes(tmp_path: Path):
     assert reg.roles["reporter"].invocations == 0
 
 
+def test_producer_without_registry_is_unchanged(tmp_path: Path):
+    from core.approval_inbox import ApprovalInbox
+    from core.self_build_producer import produce_self_apply_proposal
+
+    class _FakeLLM:
+        def complete(self, *, system, user, max_tokens=2000, temperature=0.0):
+            return json.dumps({"target": None, "diagnosis": "nothing"})
+
+    inbox = ApprovalInbox(path=None)
+    report = produce_self_apply_proposal(
+        workspace=tmp_path, inbox=inbox, llm=_FakeLLM(), legacy_llm_manager=True
+    )
+    assert report.status == "no_patch"
+    # Default None registry writes no ledger file at all.
+    assert not (tmp_path / REGISTRY_PATH).exists()
+
+
 def test_producer_hook_never_breaks_on_registry_write_failure(tmp_path: Path):
     from core.approval_inbox import ApprovalInbox
     from core.self_build_producer import produce_self_apply_proposal

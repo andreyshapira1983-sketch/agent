@@ -18,8 +18,10 @@ from core.smart_memory import (
     MemoryConsolidationStore,
     ProceduralMemoryStore,
     consolidate_memory,
+    effective_completion,
     episode_from_agent_cycle,
     format_experience_context,
+    procedure_credit_allowed,
     procedure_from_episode,
 )
 from tests.conftest import FakeLLM
@@ -128,6 +130,83 @@ def _build_agent(workspace: Path, llm: FakeLLM) -> tuple[AgentLoop, Path]:
         consolidation_store=MemoryConsolidationStore(workspace / "data" / "consolidation.jsonl"),
     )
     return agent, workspace / "logs" / f"{trace_id}.jsonl"
+
+
+def test_grounded_but_incomplete_success_mints_no_procedure() -> None:
+    """MIR-003 / MIR-057 — the completion axis on procedure birth.
+
+    The two axes answer different questions: ``outcome`` says *were the claims
+    supported*, ``completion_state`` says *was the goal reached*. A blocked or
+    refused answer can be impeccably supported and still not have finished the
+    task — the exact live case that motivated the completion axis: a blocked
+    answer that cited every claim it made and credited ``tools:file_read`` to
+    0.857 anyway (MIR-057). (Until 2026-08-02 such a run also banked
+    ``outcome == "success"``; see the amendment below for why it no longer
+    does. The axes still answer different questions — only the three explicit
+    admissions lost their claim to ``success``.)
+
+    Such an episode must mint no procedure. The completion gate
+    (`procedure_credit_allowed`) refuses it. This guarantee was reproduced but
+    never regression-locked.
+
+    **Amended 2026-08-02 (operator ruling).** The premise above described the
+    axes as fully independent, and the assertion below used to read
+    `episode.outcome == "success"` for a blocked run. The operator overruled
+    that for self-declared non-delivery — a stored row saying `success` about a
+    run that delivered nothing is a false history regardless of axis purity —
+    so `blocked`/`refused` now bank `partial`. The completion gate is
+    unchanged and still the thing that refuses credit; the axes remain
+    independent for `achieved` / `partially_achieved` / undeclared runs.
+    """
+    for token in ("blocked", "refused"):
+        episode = episode_from_agent_cycle(
+            goal="count the lines of a large file",
+            question="how many lines?",
+            answer="Cannot determine: the provided content was truncated. [file:big.txt]",
+            tools_used=["file_read"],
+            source_labels=["file:big.txt"],
+            verified_chunks=3,      # well-grounded — every claim held up ...
+            unverified_chunks=0,
+            weak_chunks=0,
+            declared_completion=token,   # ... but the goal was NOT reached
+        )
+        # Since the 2026-08-02 ruling the admission itself keeps the row off
+        # `success`; the completion axis still records WHICH admission it was.
+        assert episode.outcome == "partial", token
+        assert effective_completion(episode) == token
+        # Both axes must agree before a procedure may be credited (MIR-057).
+        assert procedure_credit_allowed(episode) is False, token
+        assert procedure_from_episode(episode) is None, token
+
+
+def test_incomplete_success_mints_no_procedure_through_the_store(
+    workspace: Path,
+) -> None:
+    """The same guarantee at the real production entry point.
+
+    ``_record_experience_memory`` reaches procedures only through
+    ``ProceduralMemoryStore.upsert_from_episode``; a grounded-but-blocked
+    episode must yield no procedure, report ``created == False``, and leave the
+    store empty — nothing is written that a later planner could reuse.
+    """
+    store = ProceduralMemoryStore(workspace / "procedures.jsonl")
+    blocked = episode_from_agent_cycle(
+        goal="count the lines of a large file",
+        question="how many lines?",
+        answer="Cannot determine: content truncated. [file:big.txt]",
+        tools_used=["file_read"],
+        source_labels=["file:big.txt"],
+        verified_chunks=3,
+        unverified_chunks=0,
+        weak_chunks=0,
+        declared_completion="blocked",
+    )
+
+    proc, created = store.upsert_from_episode(blocked)
+
+    assert proc is None
+    assert created is False
+    assert store.load() == []
 
 
 def test_a_candidate_is_offered_but_never_outranks_a_proven_one(
@@ -488,6 +567,38 @@ def test_fast_path_skipped_when_cached_episode_used_tools(workspace: Path) -> No
     assert "STALE" not in answer
 
 
+def test_fast_path_used_when_cached_episode_had_no_tools(workspace: Path) -> None:
+    """A high-quality cached answer produced WITHOUT tools is environment-
+    independent and may be replayed verbatim via the fast path."""
+    llm = FakeLLM([])  # fast path returns before any LLM call
+    agent, log_path = _build_agent(workspace, llm)
+    question = "what is the capital of france"
+    agent.episodic_store.save(
+        EpisodeRecord(
+            goal="trivia",
+            question=question,
+            outcome="success",
+            summary="cached reasoned answer",
+            tools_used=(),
+            verified_chunks=2,
+            unverified_chunks=0,
+            full_answer="Paris is the capital of France.",
+            # This test covers the fast-path MECHANISM; eligibility (2c) and
+            # completion (MIR-057) fail-close on unclassified episodes and
+            # have their own suites.
+            usage_eligible=True,
+            completion_state="achieved",
+        )
+    )
+
+    answer = agent.run(question)
+
+    events = _events(log_path)
+    assert [e for e in events if e["event"] == "episodic_fast_path"]
+    assert answer.startswith("Paris is the capital of France.") and "из памяти" in answer  # note line, 17.11
+    assert not [c for c in llm.calls if "PLANNER_MODE" in c["system"]]
+
+
 # ---------- MIR-003 follow-up: `candidate` must be visible to the operator ----------
 
 
@@ -526,3 +637,58 @@ def test_consolidation_report_lists_candidate_procedures(workspace: Path) -> Non
     assert procedure.id in ConsolidationReport.from_dict(
         report.to_dict()
     ).candidate_procedure_ids
+
+
+def test_a_repeat_question_hint_reaches_the_planner_prompt(workspace: Path) -> None:
+    """The re-ask hint's delivery — the C06 re-audit's open candidate, closed.
+
+    The same `repeat_ep` that feeds the replay admission also builds a
+    `<repeat_question_hint>` block for the planner: past id, outcome, quality,
+    the previous question and summary. Measured 2026-08-08 (M60): the hint
+    could be built and dropped on the floor and nothing anywhere reddened —
+    no test in the repository mentioned repeat_question_hint at all.
+
+    Delivery only. What the block changes in a live model's answer is
+    mock-blind by nature, so this arc stays PARTIAL in the
+    prompt_to_model_family, exactly like the other members.
+    """
+    question = "как устроена политика памяти проекта"
+    llm = FakeLLM([PLAN_GENERAL_KNOWLEDGE, SYNTH_GENERAL_KNOWLEDGE])
+    agent, log_path = _build_agent(workspace, llm)
+    agent.episodic_store.save(
+        EpisodeRecord(
+            goal="memory policy",
+            question=question,          # identical text -> similarity 1.0
+            outcome="success",
+            summary="ранее объяснённая политика памяти",
+            tools_used=(),
+            # Quality is DERIVED from the chunk counts, not taken from a
+            # passed-in score (discovered by probe: setting the score directly
+            # was silently overridden and the fast path replayed instead).
+            # Zero verified against five unverified puts quality under the
+            # 0.70 replay bar, so the planner actually runs and its prompt can
+            # be inspected — while re-ask detection, which only needs
+            # usage eligibility, still fires.
+            verified_chunks=0,
+            unverified_chunks=5,
+            full_answer="Политика памяти описана в data/persistent_memory.jsonl.",
+            usage_eligible=True,
+            completion_state="achieved",
+        )
+    )
+
+    agent.run(question)
+
+    planner_calls = [c for c in llm.calls if "PLANNER_MODE" in c["system"]]
+    assert planner_calls, (
+        "precondition: the planner must actually run, or there is no prompt "
+        "to carry the hint (a replay would have skipped it)"
+    )
+    assert "<repeat_question_hint>" in planner_calls[0]["user"], (
+        "the re-ask hint never reached the planner: the loop detected a "
+        "repeated question and told the planner nothing about it (M60 hole)"
+    )
+    events = _events(log_path)
+    assert [e for e in events if e["event"] == "repeat_question_detected"], (
+        "the detection must be journaled alongside the delivery"
+    )

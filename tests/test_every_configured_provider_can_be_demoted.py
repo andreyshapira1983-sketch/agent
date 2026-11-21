@@ -32,6 +32,7 @@ from pathlib import Path
 
 import pytest
 
+from core.model_router import _PROVIDER_FALLBACK_ORDER
 from core.model_usage import ModelUsageLedger
 
 #: (провайдер, фраза, должен ли демотировать) — по документации самих провайдеров.
@@ -96,3 +97,13 @@ def test_a_durable_failure_parks_the_provider_and_a_transient_one_does_not(
             f"{provider}: «{message[:60]}» — преходящий отказ отправил здорового "
             "провайдера в двухчасовой отдых"
         )
+
+
+def test_every_provider_in_the_fallback_order_has_evidence() -> None:
+    """Новый провайдер в цепочке не наследует покрытие соседа молча."""
+    covered = {provider for provider, _, _ in CASES}
+    missing = [p for p in _PROVIDER_FALLBACK_ORDER if p not in covered]
+    assert not missing, (
+        f"в цепочке отката есть провайдеры без единой замеренной фразы: {missing} — "
+        "их долговечные отказы не проверял никто"
+    )

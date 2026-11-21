@@ -103,6 +103,14 @@ def _stop_reason(events: list[dict]) -> str:
     return ""
 
 
+def test_a_healthy_run_reaches_evidence_in_one_invocation() -> None:
+    """GUARD: without this, 'called once' would also describe a broken fixture."""
+    tool, events = _run(break_postprocessing=False)
+    assert tool.calls == 1
+    collected = [e for e in events if e.get("event") == "evidence_collected"]
+    assert collected and collected[-1]["payload"]["count"] == 1
+
+
 def test_broken_postprocessing_stops_the_run_instead_of_repeating_it() -> None:
     tool, events = _run(break_postprocessing=True)
 

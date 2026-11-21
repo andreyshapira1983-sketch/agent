@@ -13,6 +13,7 @@ from core.approval_inbox import ApprovalInbox
 from core.autonomous_runtime import (
     AutonomousRuntime,
     AutonomousRuntimeConfig,
+    standing_runs_today,
 )
 from tests.test_autonomous_runtime import _agent
 
@@ -68,3 +69,15 @@ def test_an_expired_grant_powers_nothing(workspace: Path):
     report = _run(workspace, inbox)
 
     assert report.status == "blocked"
+
+
+def test_usage_counts_only_today_and_this_grant(workspace: Path):
+    from core.autonomous_runtime import _record_standing_use
+
+    _record_standing_use(workspace, "grant_a")
+    _record_standing_use(workspace, "grant_a")
+    _record_standing_use(workspace, "grant_b")
+
+    assert standing_runs_today(workspace, "grant_a") == 2
+    assert standing_runs_today(workspace, "grant_b") == 1
+    assert standing_runs_today(workspace, "grant_c") == 0

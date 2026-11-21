@@ -19,6 +19,19 @@ def _gen():
     return mod
 
 
+def test_every_named_judge_is_a_live_module_somebody_calls() -> None:
+    gen = _gen()
+    sources = "\n".join(p.read_text(encoding="utf-8") for p in (ROOT / "core").glob("*.py"))
+    for _stage, mod, _how, _what in gen.JUDGES:
+        assert (ROOT / "core" / f"{mod}.py").is_file(), mod
+        # Кто-то вне самого модуля его импортирует: мёртвый судья в карте — ложь.
+        importers = [p for p in (ROOT / "core").glob("*.py")
+                     if p.stem != mod and any(f"{prefix}{mod} import" in p.read_text(encoding="utf-8")
+                                              for prefix in ("core.", "from ."))]
+        assert importers, f"no core module imports core.{mod}"
+    assert "core.judge_queue" in sources
+
+
 def test_the_generated_map_carries_the_section_in_order() -> None:
     gen = _gen()
     doc = gen.build_document()

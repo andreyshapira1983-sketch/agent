@@ -34,6 +34,8 @@ from core.smart_memory import EpisodicMemoryStore
 from tests.conftest import FakeLLM
 from tests.test_memory_core_wiring import (
     SYNTH_GENERAL,
+    _drive_one_cycle,
+    _durable_snapshot,
 )
 
 QUESTION = "how much is two plus two"
@@ -71,6 +73,97 @@ def _drive_until_it_raises(agent: AgentLoop, exc: BaseException) -> None:
 
 
 # ==========================================================================
+# Write-back: the episode sink, and nothing else.
+# ==========================================================================
+def test_autonomous_cycle_banks_exactly_one_episode(tmp_path: Path) -> None:
+    agent = _autonomous(tmp_path)
+    before = _durable_snapshot(tmp_path)
+
+    assert _drive_one_cycle(agent, QUESTION), "the cycle must produce an answer"
+
+    after = _durable_snapshot(tmp_path)
+    changed = {k for k in before if before[k] != after[k]}
+    assert changed == {str(Path("data") / "episodic_memory.jsonl")}, (
+        f"only the episode sink may change; got: {sorted(changed)}"
+    )
+    assert len(_episodes(tmp_path)) == 1
+
+
+def test_autonomous_episode_is_quarantined_not_unclassified(tmp_path: Path) -> None:
+    """False (withheld on purpose) must be distinguishable from None (legacy)."""
+    _drive_one_cycle(_autonomous(tmp_path), QUESTION)
+
+    banked = _episodes(tmp_path)[0]
+    assert banked.usage_eligible is False, (
+        "an episode written under known-broken quality semantics is an explicit "
+        "quarantine decision, not an unclassified legacy row"
+    )
+
+
+def test_autonomous_episode_carries_run_id(tmp_path: Path) -> None:
+    _drive_one_cycle(_autonomous(tmp_path), QUESTION, task_id="T-9")
+
+    banked = _episodes(tmp_path)[0]
+    assert banked.run_id, "the attempt that produced it must be identifiable"
+    assert banked.task_id == "T-9"
+
+
+def test_banked_autonomous_episode_is_not_fed_back(tmp_path: Path) -> None:
+    """The whole point of quarantining: the loop closes but stays inert."""
+    agent = _autonomous(tmp_path)
+    _drive_one_cycle(agent, QUESTION)
+    assert len(_episodes(tmp_path)) == 1
+
+    recalled = _autonomous(tmp_path)._retrieve_experience_memory(QUESTION)
+    assert not recalled.strip(), (
+        "a quarantined episode must not come back as experience"
+    )
+
+
+# ==========================================================================
+# The two silent-skip branches of abort banking (loop_memory_write:398-401).
+# Both must skip the WRITE while the exception still propagates: suppression
+# governs what may be persisted, never whether the caller learns of the crash.
+# ==========================================================================
+def test_suppressed_agent_aborts_loudly_but_banks_nothing(tmp_path: Path) -> None:
+    """Allowlist without the episode sink: the abort write obeys it too."""
+    agent = build_agent(
+        tmp_path,
+        with_memory=False,
+        with_experience=True,
+        episodic_replay=False,
+        durable_writes=frozenset(),   # nothing may be written durably
+        approval_provider=None,
+    )
+
+    with pytest.raises(RuntimeError):
+        _drive_until_it_raises(agent, RuntimeError("boom"))
+
+    assert _episodes(tmp_path) == [], (
+        "a suppressed sink stays suppressed on the abort path as well"
+    )
+
+
+def test_agent_without_episodic_store_aborts_loudly_and_writes_nothing(
+    tmp_path: Path,
+) -> None:
+    """No store at all: the abort path must not crash and must not create one."""
+    agent = build_agent(
+        tmp_path,
+        with_memory=False,
+        with_experience=False,
+        approval_provider=None,
+    )
+
+    with pytest.raises(RuntimeError):
+        _drive_until_it_raises(agent, RuntimeError("boom"))
+
+    assert not (tmp_path / DEFAULT_EPISODIC_MEMORY_PATH).exists(), (
+        "an agent built without experience memory may not conjure the file on abort"
+    )
+
+
+# ==========================================================================
 # Safety: an unfinished run is never a success.
 # ==========================================================================
 def test_exception_is_not_banked_as_success(tmp_path: Path) -> None:
@@ -105,3 +198,41 @@ def test_keyboard_interrupt_is_reraised_and_not_banked_as_success(tmp_path: Path
 
     banked = _episodes(tmp_path)
     assert banked and banked[0].outcome != "success"
+
+
+def test_aborted_episode_is_also_quarantined(tmp_path: Path) -> None:
+    agent = _autonomous(tmp_path)
+    with pytest.raises(RuntimeError):
+        _drive_until_it_raises(agent, RuntimeError("boom"))
+
+    assert _episodes(tmp_path)[0].usage_eligible is False
+
+
+def test_one_abort_banks_one_episode(tmp_path: Path) -> None:
+    """Idempotency keys on run_id, so the abort path cannot double-write."""
+    agent = _autonomous(tmp_path)
+    with pytest.raises(RuntimeError):
+        _drive_until_it_raises(agent, RuntimeError("boom"))
+
+    assert len(_episodes(tmp_path)) == 1
+
+
+# ==========================================================================
+# GUARD: the happy path is unchanged.
+# ==========================================================================
+def test_completed_cycle_is_not_treated_as_aborted(tmp_path: Path) -> None:
+    """A cycle that finished must be scored by its evidence, not by the abort path.
+
+    The concrete outcome here is `partial` rather than `success` — this fake
+    cycle cites sources the verifier cannot resolve, so unverified chunks
+    outnumber verified ones (the MIR-001 rule). That is correct scoring. What
+    this guards is that a COMPLETED run never lands on the aborted branch,
+    which would force `failed` regardless of evidence.
+    """
+    _drive_one_cycle(_autonomous(tmp_path), QUESTION)
+
+    banked = _episodes(tmp_path)[0]
+    assert banked.outcome in {"success", "partial"}, (
+        f"a completed cycle was scored {banked.outcome!r}"
+    )
+    assert "aborted" not in banked.tags

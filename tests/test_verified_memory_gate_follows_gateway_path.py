@@ -22,6 +22,56 @@ import ast
 import inspect
 import pathlib
 
+import pytest
+
+from core.loop_memory_write import AgentLoopMemoryWrite
+
+
+class _Agent(AgentLoopMemoryWrite):
+    """Only what the gate reads — the question must not need a whole runtime."""
+
+    def __init__(self, gateway_path: str) -> None:
+        self.gateway_path = gateway_path
+
+
+# ---------------------------------------------------------------------------
+# The question, once, for every value the field can hold
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    ("gateway_path", "unattended"),
+    [
+        ("repl", False),      # a human is typing and can judge one source
+        ("daemon", True),     # nobody is watching
+        ("runtime", True),    # nobody is watching
+    ],
+)
+def test_unattended_is_read_from_gateway_path(gateway_path: str, unattended: bool):
+    assert _Agent(gateway_path)._unattended_run() is unattended
+
+
+def test_a_missing_gateway_path_reads_as_attended():
+    """The default is the safe direction for the FIELD, not for the gate.
+
+    An agent built without the attribute is a REPL agent — that is what
+    `AgentLoop.__init__` defaults to. Reading it as unattended would make an
+    ordinary interactive turn demand corroboration it was never meant to need.
+    """
+    class _Bare(AgentLoopMemoryWrite):
+        pass
+
+    assert _Bare()._unattended_run() is False
+
+
+def test_the_gate_follows_the_agent_not_the_call_site():
+    """The whole point of Л8, stated as behaviour rather than as a rule.
+
+    Same code path, same file, two different agents — and the answer differs.
+    Before the fix it could not: the value was written into the call.
+    """
+    assert _Agent("repl")._unattended_run() != _Agent("daemon")._unattended_run()
+
+
 # ---------------------------------------------------------------------------
 # Every real write site asks it
 # ---------------------------------------------------------------------------

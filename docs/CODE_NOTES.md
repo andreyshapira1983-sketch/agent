@@ -110,7 +110,7 @@ next branch caught it and `.strip()` erased the difference. Removed in
 `0f0ff37`.
 
 **Wiring breaks after extracting** (nine, split deliberately): the four
-collector breaks fail through `TestCollectPastedBlock` in
+collector breaks fail through `TestCollectPastedBlock` (removed in the 2026-11-21 test cut) in
 [tests/test_cli.py](../tests/test_cli.py); the five wiring breaks — result not
 assigned, wrong prompt, empty block not discarded, EOF not exiting, notice
 changed — fail through the characterization tests that go via `main()`. A
@@ -2214,7 +2214,7 @@ four episodes above, read by hand.
 ### Where the line is drawn, and what it costs
 
 Not `verified > 0` but `verified == examined`. An existing test
-(`test_a_low_relevance_answer_says_so_in_the_operator_tail`) holds the harder
+(`test_a_low_relevance_answer_says_so_in_the_operator_tail` (removed in the 2026-11-21 test cut)) holds the harder
 case: 14 of 16 verified, and the answer is about something else. A turn's
 evidence chain gathers material on more than one subject, so an answer can be
 grounded in it and still address the wrong thing. Full verification closes that
@@ -4593,7 +4593,7 @@ mostly the seams:
 `core.autonomous_runtime`. A re-export does not fix that — patching rebinds a
 name in one module while the moved code looks it up in its own. The addresses
 were repointed at the module where the code now lives, and
-`test_the_patch_seam_lives_where_the_code_does` pins it so the next move
+`test_the_patch_seam_lives_where_the_code_does` (removed in the 2026-11-21 test cut) pins it so the next move
 notices.
 
 **A production consumer.** `core/approval_triage` imported
@@ -5180,7 +5180,7 @@ gathered» and «evidence was gathered and did not hold» — and on the live st
 all 64 unverified records are the first kind. `_signal_standing` therefore
 returns three values, not a boolean, and ignorance sorts above failure rather
 than with it. The first version of this change got that wrong and was caught by
-an existing test, `test_search_boosts_lesson_episodes`, which encodes an earlier
+an existing test, `test_search_boosts_lesson_episodes` (removed in the 2026-11-21 test cut), which encodes an earlier
 decision about lessons; the earlier decision was kept rather than overwritten.
 
 Measurements: `scripts/memguard_axis_probe.py` (the population and the
@@ -5384,7 +5384,7 @@ from that plan alone — a turn that read and wrote a file banked an empty list,
 very list procedure learning reads. `core/smart_memory.py::episode_tools` keeps the
 last plan and appends whatever executed earlier; without rounds everything executed
 is already in the last plan, so nothing changes. Witness:
-`tests/test_a_read_is_not_the_end_of_the_turn.py::test_the_episode_names_every_tool_the_turn_ran`.
+`tests/test_a_read_is_not_the_end_of_the_turn.py::test_the_episode_names_every_tool_the_turn_ran` (removed in the 2026-11-21 test cut).
 
 ## The lab computes over task files; a command's result travels as its output
 
@@ -5435,7 +5435,7 @@ run admitted as experience. `format_observations` now prints every written
 content verbatim between `<<<`/`>>>` with its path and length, and the planner
 prompt says the whole stdout is carried, so a probe feeding a file prints the
 file and nothing else. Witness:
-`test_the_round_shows_what_a_reference_wrote_verbatim`.
+`test_the_round_shows_what_a_reference_wrote_verbatim` (removed in the 2026-11-21 test cut).
 
 **Addendum: copy from the outputs, compute in the lab.** Same experiment, next
 run: the round's own text said «compute values from the outputs above yourself»,
@@ -5452,7 +5452,7 @@ as invented. content_refuted is disqualifying, and the correct episodes lost
 their place in experience. `_python_probe_evidence` now adds inputs,
 missing_inputs, stdout_truncated and duration_ms; both file lists name only files
 that exist in the workspace, and the code still stays out. Witness:
-`test_true_facts_of_a_run_are_not_refuted`.
+`test_true_facts_of_a_run_are_not_refuted` (removed in the 2026-11-21 test cut).
 
 **Addendum: «no errors» is not the absence of the file that was read.** With the
 lab's evidence complete, the next run's true claims fell to another gate:
@@ -5465,7 +5465,7 @@ action («найден», «прочитал», «завершился», found,
 absence marker. The pinned compound «атрибут отсутствует, поэтому код с
 `itertools.batched` …» keeps its subject: that part asserts nothing present.
 Witnesses: `test_no_errors_does_not_make_the_read_file_absent`,
-`test_an_absence_beside_a_presence_is_still_judged`.
+`test_an_absence_beside_a_presence_is_still_judged` (removed in the 2026-11-21 test cut).
 
 **Addendum: a place searched is not the thing absent; the runtime block is citable
 field by field.** Next run, three more ways a correct episode lost experience.
@@ -5511,7 +5511,7 @@ prompt directive) now fires only where those files exist
 (`LLMPlanner._confidence_sources_here`); in the agent's own repository nothing
 changes, and an unknown root keeps the old behaviour. The three planner tests
 that pinned the route now build a workspace that has the files. Witness:
-`test_a_quotation_in_a_book_does_not_send_the_planner_to_its_own_verifier`.
+`test_a_quotation_in_a_book_does_not_send_the_planner_to_its_own_verifier` (removed in the 2026-11-21 test cut).
 
 **A window of a large file was refused.** findstr found Lao-Tzu at line 14849 of
 Erickson_Algorithms.txt (1.1 MB); `file_read(start_line=14820, end_line=14880)`
@@ -5531,7 +5531,7 @@ now goes through `_statements`: the window header and line numbers are stripped,
 wrapped lines are rejoined (a continuation starts lower-case), and only a
 finished sentence or a list item becomes a claim candidate. `_sentences` is left
 for the injection guard's spans. Witness:
-`test_a_book_window_yields_sentences_not_its_lines`.
+`test_a_book_window_yields_sentences_not_its_lines` (removed in the 2026-11-21 test cut).
 
 **Addendum: the lab copies a named workspace file by itself, and never a key.**
 Second library run: the planner rightly chose python_probe for «how many PAGE
@@ -5626,7 +5626,7 @@ number, so the echo gate would silence every correction the dedup gate let
 through. `remember(..., supersedes=True)` skips the echo gate for a write that
 replaces an earlier conclusion to the same question (which goes to the archive,
 so no echo chamber can form). Witness:
-`test_a_correction_is_not_silenced_as_an_echo` (without the exemption: reject,
+`test_a_correction_is_not_silenced_as_an_echo` (removed in the 2026-11-21 test cut) (without the exemption: reject,
 similarity 0.89).
 
 ## The first work exam (2026-09-19, exam/work_exam.py)
@@ -5639,7 +5639,7 @@ four misses were agent defects; three fixed here, one left for a decision.
 the console code page while the tool decoded UTF-8; sales.csv's product names
 arrived garbled, and the agent «restored» them by inventing «Кран, Смеситель,
 Труба» — a fabricated deliverable. The probe now runs `-X utf8` (PYTHONIOENCODING
-would be ignored under `-I`). Witness: `test_cyrillic_output_arrives_intact`.
+would be ignored under `-I`). Witness: `test_cyrillic_output_arrives_intact` (removed in the 2026-11-21 test cut).
 
 **Running the tests was taken for the work.** «Read the code → run the tests»
 counted as an effect batch with no failed step (red tests do not fail the
@@ -5654,7 +5654,7 @@ whether you can do each task and how many steps» — the low-evidence gate remo
 the whole answer (0 of 10 claims sourced). A forecast is the plan genre: its
 vocabulary (прогноз, оценк, справлюсь, шагов, forecast, estimate) joins
 `_PLAN_MARKERS`; the genre's guards (no result report, no external fact) stay.
-Witness: `test_a_requested_forecast_is_not_stripped_as_unsupported`.
+Witness: `test_a_requested_forecast_is_not_stripped_as_unsupported` (removed in the 2026-11-21 test cut).
 
 **Doctrine routes read documents that are not there.** The morning's verifier
 fix covered one route; «would you take this job … without other people's
@@ -5665,7 +5665,7 @@ doctrine, subagent, memory and self-repair routes (injection and prompt
 directive) now fire only where one of their documents exists
 (`doc_routing.doctrine_docs_present`). Eleven planner tests that pinned the
 routes now build a repo-like workspace. Witness:
-`test_a_doctrine_route_is_silent_where_its_documents_are_absent`.
+`test_a_doctrine_route_is_silent_where_its_documents_are_absent` (removed in the 2026-11-21 test cut).
 
 Left for a decision: an order with an unspecified format and recipient («make
 the client a report in the format he needs and send it») was answered with a
@@ -5692,7 +5692,7 @@ names the hole in the round's block.
 never run once. The planner prompt: code handed over is run once, with a
 checkable input, before it is handed over.
 Witnesses: `test_an_unfilled_template_is_not_finished_work`,
-`test_the_agent_sees_its_own_tools`.
+`test_the_agent_sees_its_own_tools` (removed in the 2026-11-21 test cut).
 
 **Addendum: third work run — a stale cache undid a correct fix; the client's
 format and the agent's decisions reach the answer.** Third run 6/10; the order
@@ -5738,7 +5738,7 @@ Two worlds, two statuses (operator, 2026-09-19): the local library is the source
 of truth; the internet is a source still to be qualified. A conclusion resting
 on web sources is not written to long-term memory by `learned_conclusion`; it
 stays experience in the episode. Witness:
-`test_a_conclusion_from_the_internet_is_not_made_a_fact`. The web exam
+`test_a_conclusion_from_the_internet_is_not_made_a_fact` (removed in the 2026-11-21 test cut). The web exam
 (exam/web_exam.py) measures the rest, including web records in long-term memory.
 
 **Addendum: a flagged page is still evidence; documentation is not an attack;
@@ -5753,7 +5753,7 @@ the description «Intermediaries act as both client and server». 5 pages of 9.
 Override now needs a claim of replacement (new/updated/system … instructions,
 or an «Instructions:» heading); «act as» only as an imperative (sentence start,
 after «please / you must»). The old bare-word pattern is kept verbatim in
-test_injection_scan_scope.py as the witness of the root cause it once caused.
+test_injection_scan_scope.py (removed in the 2026-11-21 test cut; does not exist any more) as the witness of the root cause it once caused.
 (2) The `suspicious` annotation turned the `web_fetch` dict into a string; the
 evidence factory builds `web_page` only from the dict, so the fetched page never
 entered the chain. The answer cited it, the verifier counted 5 «fabricated»
@@ -5783,7 +5783,7 @@ lacks the intermediate). The guarded `https_open` called `do_open` without
 It now passes `self._context`, built on certifi's roots when installed (as
 requests does; mixing both stores still fails — measured). Expired, wrong-host
 and self-signed certificates are still refused (checked live). Witness:
-`test_the_tls_context_reaches_the_connection`.
+`test_the_tls_context_reaches_the_connection` (removed in the 2026-11-21 test cut; does not exist any more).
 (3) `find_in_files` searched `logs/` and `data/` — the agent's own journal and
 memory — and for «release» found only this turn's trace, which contains the
 query itself; the answer was «not found» over the echo of its own question.
@@ -5805,7 +5805,7 @@ exactly should be built?». `frame_questions_help` now also returns False when
 the completion contract saw no ambiguity and the run gathered artifacts; a run
 that gathered nothing (failing tool, unparsable plan) still asks, as the pinned
 tests require. Witness:
-`test_a_clear_request_with_gathered_evidence_is_not_a_frame_problem`.
+`test_a_clear_request_with_gathered_evidence_is_not_a_frame_problem` (removed in the 2026-11-21 test cut).
 
 **Addendum: a JSON API answer keeps its facts in view.** Same N04, root cause:
 https://pypi.org/pypi/ruff/json is 1 MB (cut at the fetch limit); the field
@@ -5844,7 +5844,7 @@ NOT find SQLAlchemy's (2026-09-15; its JSON is >1 MB, cut inside `releases`, so
 «pydantic». Two changes: the output contract says a comparison needs every
 side measured and a missing date is not an earlier date; `web_fetch` drops
 whitespace-only lines (the PyPI page shrinks by a quarter). Witness for the
-fetch: `test_space_only_lines_do_not_eat_the_window`.
+fetch: `test_space_only_lines_do_not_eat_the_window` (removed in the 2026-11-21 test cut).
 
 **Addendum: the first hour of the 24h run — why the agent could not change
 itself.** The agent chose its own goal and, on cycle 4, proposed splitting
@@ -5864,7 +5864,7 @@ any apply;
 later split (step_sanitizer, smart_memory, operator_intent_patterns) was
 refused «prior rollback lesson». `blocking_lesson` now ignores
 `SHARED_BOOKKEEPING` files when both sides have their own targets. Witness:
-`test_a_shared_registry_does_not_make_two_changes_the_same`.
+`test_a_shared_registry_does_not_make_two_changes_the_same` (removed in the 2026-11-21 test cut).
 
 **Addendum: a battery that ran out of time is not a failed change.** Second
 hour of the 24h run: the agent's split of `core/step_sanitizer.py` passed its
@@ -5929,7 +5929,7 @@ turns such an idle cycle into one agent pass on the goal itself (`pursue_goal`,
 once per goal, banked like any action), prompted to do the work and produce the
 result its own success check names. The goal and its check remain the agent's.
 `failed_in_a_row` is now cleared with the goal as well. Witness:
-`test_an_idle_goal_is_worked_on_not_watched`.
+`test_an_idle_goal_is_worked_on_not_watched` (removed in the 2026-11-21 test cut; does not exist any more).
 The relaunch at 18:36 stopped at once: all three goal picks were refused by the
 novelty guard («goal repeats a recent campaign goal») — the agent keeps coming
 back to the same two topics. The number of attempts, at the start and at a

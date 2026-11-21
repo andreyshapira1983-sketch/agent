@@ -19,6 +19,8 @@ from core.doc_routing import (
     _ensure_memory_governance_docs_first,
     _ensure_self_repair_doctrine_docs_first,
     _ensure_subagent_governance_docs_first,
+    _is_memory_governance_question,
+    _is_subagent_governance_question,
     _norm_source_path,
 )
 from core.planner import LLMPlanner
@@ -660,6 +662,47 @@ class TestShellExecSanitizer:
     # --- case insensitivity at planner layer ---
 
 
+# ---------- thematic sub-agent governance doc routing (conditional) ----------
+
+
+def test_subagent_governance_detector_strong_terms() -> None:
+    for q in (
+        "How do subagents get retired?",
+        "explain sub-agent delegation",
+        "what does the team executor do",
+        "как работает делегирование подагентам",
+        "жизненный цикл субагента",
+    ):
+        assert _is_subagent_governance_question(q), q
+
+
+def test_subagent_governance_detector_contextual_pair() -> None:
+    # weak action term only counts with an agent/role context word
+    assert _is_subagent_governance_question("when do we quarantine an agent?")
+    assert _is_subagent_governance_question("retire this role")
+    assert _is_subagent_governance_question("карантин для агента")
+
+
+def test_subagent_governance_detector_pause_route() -> None:
+    # "pause" is documented as a routing action; the positive branch must work
+    # (agent/role context + a pause form), while a bare build pause must not.
+    assert _is_subagent_governance_question("pause this agent")
+    assert _is_subagent_governance_question("поставь роль на паузу")
+    assert not _is_subagent_governance_question("pause the build")
+    assert not _is_subagent_governance_question("пауза в сборке")
+
+
+def test_subagent_governance_detector_does_not_overfire() -> None:
+    for q in (
+        "explain the corporate model",
+        "what is on the roadmap",
+        "pause the build and retire the old feature flag",
+        "fix the bug in core/loop.py",
+        "central agent governance policy gate",
+    ):
+        assert not _is_subagent_governance_question(q), q
+
+
 # ---------- thematic memory governance doc routing (conditional) ----------
 
 
@@ -730,6 +773,48 @@ def test_non_memory_doctrine_question_omits_memory_docs(workspace: Path) -> None
     assert "knowledge/doctrine/future/CORPORATE_MODEL.md" in paths, paths
     assert "knowledge/doctrine/MEMORY_SYSTEM_AUDIT.md" not in paths, paths
     assert "knowledge/doctrine/self-audit-lessons.md" not in paths, paths
+
+
+def test_memory_governance_detector_strong_terms() -> None:
+    for q in (
+        "how is episodic memory consolidated?",
+        "what does procedural memory store",
+        "объясни консолидацию памяти",
+        "почему забывание не работает автоматически",
+        "what is memory hygiene",
+        "bug in core/smart_memory.py",
+    ):
+        assert _is_memory_governance_question(q), q
+
+
+def test_memory_governance_detector_contextual_pair() -> None:
+    # a weak action term only counts together with a memory context word
+    assert _is_memory_governance_question("how does memory retrieval work?")
+    assert _is_memory_governance_question("какое хранилище у памяти")
+    assert _is_memory_governance_question("что агент помнит и чему обучается из памяти")
+
+
+def test_memory_governance_detector_does_not_overfire() -> None:
+    for q in (
+        "explain the corporate model",
+        "what is on the roadmap",
+        "how do subagents get retired?",
+        "fix the bug in core/loop.py",
+        "run the tests and show coverage",
+        "какая погода сегодня",
+        "this is a memorable result",
+    ):
+        assert not _is_memory_governance_question(q), q
+
+
+def test_memory_and_subagent_groups_are_independent() -> None:
+    """The two thematic groups must not collapse into one another."""
+    assert _is_memory_governance_question("how is episodic memory consolidated?")
+    assert not _is_subagent_governance_question(
+        "how is episodic memory consolidated?"
+    )
+    assert _is_subagent_governance_question("how do subagents get retired?")
+    assert not _is_memory_governance_question("how do subagents get retired?")
 
 
 def test_question_touching_three_themes_keeps_stable_order(workspace: Path) -> None:

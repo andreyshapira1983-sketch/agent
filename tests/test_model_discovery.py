@@ -22,6 +22,7 @@ import core.model_catalog as mc
 from core.model_catalog import _load_catalog, _save_catalog
 from core.model_discovery import (
     _diff_catalog,
+    build_discovery_audit,
     build_discovery_report,
 )
 
@@ -66,6 +67,26 @@ def test_diff_reports_changed_tier_best():
     diff = _diff_catalog(current, discovered)
     # tier_best for deep changed old -> new
     assert ("anthropic", "deep", "claude-opus-4-5", "claude-opus-4-8") in diff.changed
+
+
+# ── build_discovery_audit: local only, no network ────────────────────────────
+
+def test_audit_is_local_and_writes_nothing(monkeypatch, tmp_path):
+    cat = _isolate(monkeypatch, tmp_path)
+
+    # Any fetcher call would raise; the audit must never call one.
+    def _boom(api_key=None):
+        raise AssertionError("audit must not contact providers")
+
+    monkeypatch.setattr(mc, "_FETCHERS", {"anthropic": _boom, "openai": _boom})
+
+    report = build_discovery_audit()
+
+    assert report.live is False
+    assert report.to_dict()["wrote_catalog"] is False
+    assert not cat.exists()
+    # mock is supported but has no fetcher -> unsupported bucket.
+    assert "mock" in report.unsupported
 
 
 # ── build_discovery_report: dry-run, credential gating, no secrets ───────────

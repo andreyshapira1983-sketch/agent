@@ -54,6 +54,13 @@ def repo(tmp_path: Path) -> tuple[Path, str]:
     return tmp_path, sha
 
 
+def test_an_untouched_subject_is_intact(repo) -> None:
+    root, sha = repo
+    module = _guard()
+    code, evidence = module.check(sha, root)
+    assert code == module.INTACT, evidence
+
+
 def test_a_changed_production_file_is_tracked_drift(repo) -> None:
     root, sha = repo
     module = _guard()
@@ -87,9 +94,26 @@ def test_both_conditions_report_as_both(repo) -> None:
     assert code == module.BOTH
 
 
+def test_the_laboratory_may_grow_without_moving_the_subject(repo) -> None:
+    """`scripts/`, `tests/`, `docs/`, `knowledge/` are the lab, not the agent."""
+    root, sha = repo
+    module = _guard()
+    (root / "docs" / "note.md").write_text("lab, extended\n", encoding="utf-8")
+    (root / "scripts").mkdir()
+    (root / "scripts" / "qm_new_probe.py").write_text("\n", encoding="utf-8")
+    code, evidence = module.check(sha, root)
+    assert code == module.INTACT, evidence
+
+
 def test_an_unusable_snapshot_is_never_reported_as_intact(repo) -> None:
     """A guard that says INTACT when it could not look is worse than no guard."""
     root, _ = repo
     module = _guard()
     code, _ = module.check("0" * 40, root)
     assert code == module.UNREADABLE
+
+
+def test_the_real_subject_paths_are_the_ones_the_program_froze() -> None:
+    module = _guard()
+    assert set(module.SUBJECT_PATHS) == {
+        "core", "cli", "app", "api", "tools", "agent_tick.py", "main.py"}

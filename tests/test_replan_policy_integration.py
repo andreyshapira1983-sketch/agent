@@ -220,6 +220,70 @@ class TestAcceptanceWebEmpty:
 
 
 # ============================================================
+# Acceptance 2 — tool_error retry bounded by budget
+# ============================================================
+
+class TestAcceptanceToolErrorBounded:
+    def test_two_tool_errors_stop_with_abort_no_retry(self, workspace: Path):
+        def behaviour(call_n, kwargs):
+            raise RuntimeError(f"tool failure #{call_n}")
+
+        flaky = _RecordingTool("flaky", behaviour, risk="read_only")
+        step = {"tool": "flaky", "arguments": {}, "label": "stub", "expected_outcome": "x"}
+        planner = FakePlanner(sources=[step])
+        # max_total=5 so the GLOBAL cap doesn't fire first.
+        agent, log_path = _build_agent(
+            workspace, [flaky], planner,
+            replan_policy=ReplanPolicy(max_total_replans=5),
+            llm_responses=[SYNTH_FAILED],
+        )
+        agent.run(user_question="run", file_hint=None)
+
+        # Exactly TWO tool_error triggers -> budget exhausts -> abort_no_retry.
+        events = _events(log_path)
+        exhausted = [e for e in events if e["event"] == "replan_exhausted"]
+        assert len(exhausted) == 1
+        payload = exhausted[0]["payload"]
+        assert payload["decision_action"] == "abort_no_retry"
+        assert payload["failure_counts"]["tool_error"] == 2
+        # The tool ran exactly 2 times (each attempt → 1 call).
+        assert flaky.calls == 2
+
+
+# ============================================================
+# Acceptance 4 — policy_blocked: agent proposes a different tool
+# ============================================================
+
+class TestAcceptancePolicyBlocked:
+    def test_blocked_tool_then_alternative_runs(self, workspace: Path):
+        """First attempt names a non-existent tool → policy_blocked.
+        Second attempt names a real registered tool → success.
+        """
+        safe = _RecordingTool("safe_read", lambda n, k: "OK", risk="read_only")
+        plans = [
+            # Attempt 1 — unknown tool, registry will block.
+            [{"tool": "nope", "arguments": {"x": 1}, "label": "stub:nope",
+              "expected_outcome": "blocked"}],
+            # Attempt 2 — switch to the registered safe tool.
+            [{"tool": "safe_read", "arguments": {}, "label": "stub:safe",
+              "expected_outcome": "ok"}],
+        ]
+        planner = _SequencedPlanner(plans)
+        agent, log_path = _build_agent(workspace, [safe], planner)
+        agent.run(user_question="something", file_hint=None)
+
+        events = _events(log_path)
+        # First attempt: policy_blocked appears in replan event triggers.
+        replans = [e for e in events if e["event"] == "replan"]
+        assert len(replans) == 1
+        assert "policy_blocked" in replans[0]["payload"]["triggers"]
+        # Forbidden actions carried forward.
+        assert replans[0]["payload"]["decision"]["forbidden_action_count"] >= 1
+        # Safe tool ran exactly once on attempt 2.
+        assert safe.calls == 1
+
+
+# ============================================================
 # Acceptance 5 — verify_failed → new plan on retry
 # ============================================================
 

@@ -21,7 +21,10 @@ from __future__ import annotations
 import ast
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
+import cli.app as app_module
+import cli.command_dispatch as dispatch_module
 import main as main_module
 
 REPO_ROOT = Path(main_module.__file__).resolve().parent
@@ -68,6 +71,37 @@ def test_no_production_module_imports_from_main():
         source = (REPO_ROOT / rel).read_text(encoding="utf-8")
         assert "from main import" not in source, rel
         assert "from app.bootstrap import build_agent" in source, rel
+
+
+def test_dotenv_is_loaded_through_cli_app(tmp_path, monkeypatch):
+    """`cli.app` performs the startup sequence, so the fakes go there."""
+    calls: list[int] = []
+    monkeypatch.setattr(app_module, "load_dotenv", lambda *a, **k: calls.append(1))
+    monkeypatch.setattr(
+        app_module,
+        "build_agent",
+        lambda *a, **k: SimpleNamespace(log=SimpleNamespace(log=lambda *x, **y: None)),
+    )
+    monkeypatch.setattr(dispatch_module, "handle_meta_command", lambda *a, **k: True)
+    monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path), "--ask", ":models"])
+
+    assert main_module.main() == 0
+    assert calls == [1]
+
+
+def test_main_is_callable_and_returns_an_int(tmp_path, monkeypatch):
+    monkeypatch.setattr(app_module, "load_dotenv", lambda *a, **k: None)
+    monkeypatch.setattr(
+        app_module,
+        "build_agent",
+        lambda *a, **k: SimpleNamespace(log=SimpleNamespace(log=lambda *x, **y: None)),
+    )
+    monkeypatch.setattr(dispatch_module, "handle_meta_command", lambda *a, **k: True)
+    monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path), "--ask", ":models"])
+
+    result = main_module.main()
+    assert isinstance(result, int)
+    assert result == 0
 
 
 def test_the_process_really_exits_with_the_code_main_returned(tmp_path):

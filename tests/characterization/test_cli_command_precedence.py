@@ -117,6 +117,16 @@ def test_one_shot_local_reply_short_circuits_before_the_intent_router(tmp_path, 
 
 # ── REPL ──────────────────────────────────────────────────────────────────────
 
+@pytest.mark.parametrize("line", [":models", "?", "  :models  "])
+def test_repl_explicit_command_beats_intent_routing(line, tmp_path, monkeypatch):
+    calls = _patch(monkeypatch)
+    monkeypatch.setattr(app_module, "_StdinLineReader", lambda **k: _scripted_reader([line]))
+    monkeypatch.setattr(sys, "argv", ["main.py", "--workspace", str(tmp_path)])
+
+    assert main_module.main() == 0
+
+    assert calls == [f"meta:{line.strip()}"]
+
 
 def test_repl_plain_text_reaches_the_intent_router(tmp_path, monkeypatch):
     calls = _patch(monkeypatch)

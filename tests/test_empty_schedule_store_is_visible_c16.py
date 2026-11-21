@@ -74,6 +74,21 @@ def _tick_with_a_schedule_not_yet_due(workspace: Path) -> dict:
     return events[0]
 
 
+def test_an_empty_store_and_a_waiting_schedule_are_different_journal_lines(tmp_path: Path):
+    """The distinction the operator needs, asserted where the operator reads."""
+    empty = _tick_on_empty_store(tmp_path / "empty")
+    waiting = _tick_with_a_schedule_not_yet_due(tmp_path / "waiting")
+
+    empty.pop("ts", None)
+    waiting.pop("ts", None)
+
+    assert empty != waiting, (
+        "a daemon with NO schedules configured and a daemon waiting for the next "
+        "window write the same journal line, so 'why is nothing happening?' has "
+        f"no answer in the log: {empty!r}"
+    )
+
+
 def test_the_journal_says_how_many_schedules_exist(tmp_path: Path):
     """Different is not enough — the value must be the honest count.
 
